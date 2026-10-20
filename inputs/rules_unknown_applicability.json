@@ -1,0 +1,17 @@
+{
+  "version": "v1-explicit-teacher-rule",
+  "rules": [
+    {
+      "id": "R40_60",
+      "method": "weighted_sum",
+      "weight_a": "0.4",
+      "weight_b": "0.6",
+      "decimal_places": 1,
+      "rounding": "ROUND_HALF_UP",
+      "source": {
+        "file": "course_materials.txt",
+        "line": 1
+      }
+    }
+  ]
+}

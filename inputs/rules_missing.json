@@ -1,0 +1,16 @@
+{
+  "version": "v0-missing-weights",
+  "rules": [
+    {
+      "id": "R40_60",
+      "applicable": true,
+      "method": "weighted_sum",
+      "decimal_places": 1,
+      "rounding": "ROUND_HALF_UP",
+      "source": {
+        "file": "course_materials.txt",
+        "line": 3
+      }
+    }
+  ]
+}

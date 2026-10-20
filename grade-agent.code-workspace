@@ -1,0 +1,13 @@
+{
+  "folders": [
+    {
+      "name": "多平台成绩整合 Agent",
+      "path": "."
+    }
+  ],
+  "settings": {
+    "files.encoding": "utf8",
+    "git.enabled": true,
+    "python.defaultInterpreterPath": "python"
+  }
+}
