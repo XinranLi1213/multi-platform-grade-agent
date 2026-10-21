@@ -192,6 +192,9 @@ class PortableModel(unittest.TestCase):
         self.assertFalse(report["checks"][2]["ok"])
         with patch("sys.version_info", (3, 10)):
             self.assertFalse(inspect_environment(root=ROOT, state_dir=self.root / "runtime")["checks"][0]["ok"])
+        (self.root / "RELEASE_MANIFEST.json").write_text('{"files":["invalid-type"]}', encoding="utf-8")
+        malformed = inspect_environment(root=self.root)
+        self.assertFalse(next(c for c in malformed["checks"] if c["name"] == "分发完整性")["ok"])
         self.record("环境检查失败", "缺源码、不可写目录、旧Python不能显示启动成功", "全部正确拒绝")
 
 

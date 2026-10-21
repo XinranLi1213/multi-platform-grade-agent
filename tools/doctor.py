@@ -31,7 +31,7 @@ def inspect_environment(root=ROOT, state_dir=None, port=8765, model_config=None)
             valid = bool(manifest["files"]) and all((root / name).resolve().is_relative_to(root)
                 and (root / name).is_file() and hashlib.sha256((root / name).read_bytes()).hexdigest() == expected
                 for name, expected in manifest["files"].items())
-        except (OSError, ValueError, KeyError, TypeError):
+        except (OSError, ValueError, KeyError, TypeError, AttributeError):
             valid = False
         checks.append({"name": "分发完整性", "ok": valid, "message": "分发文件哈希一致" if valid else "源码包缺失或文件已改变，请重新解压原包；不会忽略哈希检查"})
     try:
