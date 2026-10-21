@@ -1,0 +1,16 @@
+* text=auto
+*.py text eol=lf
+*.js text eol=lf
+*.cjs text eol=lf
+*.html text eol=lf
+*.css text eol=lf
+*.json text eol=lf
+*.md text eol=lf
+*.csv text eol=lf
+*.cmd text eol=crlf
+*.txt text eol=lf
+VERSION text eol=lf
+.gitignore text eol=lf
+.gitattributes text eol=lf
+# Intentional surrounding spaces are part of this CSV acceptance fixture.
+tests/data/09_formats/spaced.csv whitespace=-blank-at-eol

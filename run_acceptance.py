@@ -1,5 +1,6 @@
 """Execute the real CLI with fixtures and verify persisted CSV/JSON, not mock results."""
 
+import argparse
 import csv
 import hashlib
 import json
@@ -9,6 +10,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 REPORTS = ROOT / "reports"
+RUNS_ROOT = ROOT / "runs"
 CHECKS, COMMANDS = [], []
 
 
@@ -18,12 +20,12 @@ def digest(path):
 
 def run(name, rules="rules.json", a="platform_a.csv", b="platform_b.csv", previous=None,
         expected_exit=0, output_name=None):
-    output = ROOT / "runs" / (output_name or name)
+    output = RUNS_ROOT / (output_name or name)
     args = [sys.executable, "-X", "utf8", "grade_agent.py", "--platform-a", f"inputs/{a}",
             "--platform-b", f"inputs/{b}", "--rules", f"inputs/{rules}",
-            "--output-dir", f"runs/{output_name or name}"]
+            "--output-dir", str(output)]
     if previous:
-        args += ["--previous-audit", f"runs/{previous}/audit.json"]
+        args += ["--previous-audit", str(RUNS_ROOT / previous / "audit.json")]
     result = subprocess.run(args, cwd=ROOT, capture_output=True, text=True, encoding="utf-8")
     COMMANDS.append({"name": name, "cwd": str(ROOT), "argv": args,
                      "command": subprocess.list2cmdline(args), "exit_code": result.returncode,
@@ -189,7 +191,7 @@ def save_reports(fatal=None):
                "commands": COMMANDS}
     (REPORTS / "execution_log.json").write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     lines = ["实际运行验收报告", "", f"运行环境：Python {sys.version.split()[0]}；执行器 {sys.executable}",
-             f"工作目录：{ROOT}", f"结果：{payload['passed']} 通过，{payload['failed']} 失败。", "",
+             f"工作目录：{ROOT}", f"验收输出根目录：{RUNS_ROOT}（下文的runs/代表此根目录）", f"结果：{payload['passed']} 通过，{payload['failed']} 失败。", "",
              "输入位置：inputs/platform_a.csv、inputs/platform_b.csv；明确规则 inputs/rules.json；原文依据 inputs/course_materials.txt。",
              "正常输出：runs/baseline/summary.csv 和 runs/baseline/audit.json。",
              "冲突输出：runs/conflict/；教师明确后续算输出：runs/resolved/；缺规则及补充后输出：runs/missing_rules/、runs/supplemented/。", "",
@@ -211,6 +213,9 @@ def save_reports(fatal=None):
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="读取已有模拟数据并执行验收；不自动生成数据")
+    parser.add_argument("--output-root", type=Path, default=RUNS_ROOT, help="验收结果根目录，默认项目runs目录")
+    RUNS_ROOT = parser.parse_args().output_root.resolve()
     failure = None
     try:
         execute_checks()

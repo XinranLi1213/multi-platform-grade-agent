@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>多平台数据整合 · 本地工作台</title><link rel="stylesheet" href="/style.css"></head>
+<body>
+<header><div class="brand">交汇 <span>CSV DATA WORKSPACE</span></div><span class="local">● 本地工作台 · 两文件整合</span></header>
+<main>
+  <div class="note"><a href="/pipeline">进入双阶段自动执行：先归并整合 DWD，再加权计算 DWS →</a></div>
+  <div class="intro"><div><p class="eyebrow">从原始数据到可核对的结果</p><h1>先看清数据，再确认整合。</h1><p>字段同义、对象关联、重复记录分别判断。每一步都有依据，每条记录都保留来源。</p></div><div class="model-card"><strong id="model-status">正在检查语义分析配置…</strong><p id="model-disclosure"></p></div></div>
+  <nav><a href="#upload">01 任务与文件</a><a href="#reading">02 实际读取</a><a href="#planning">03 编辑方案</a><a href="#confirmation">04 核对执行</a><a href="#results">05 结果交付</a></nav>
+  <div id="message" role="status" aria-live="polite" hidden></div>
+  <section id="upload"><div class="section-title"><h2><b>01</b> 输入任务与文件</h2><span>正式入口只处理你选择的文件</span></div>
+    <label for="task">希望整合什么数据、得到什么结果？</label><textarea id="task" rows="3" placeholder="例如：整合两个平台的联系人信息，统一确认的同义字段，删除冗余副本，保留无法确定的记录。"></textarea>
+    <div class="two"><label class="upload-box">第一个平台文件<input id="file-a" type="file" accept=".csv"><small>CSV · 最多2 MiB / 5000条记录</small></label><label class="upload-box">第二个平台文件<input id="file-b" type="file" accept=".csv"><small>支持不同列名和文件名，编号按文本保留</small></label></div>
+    <div class="actions"><button id="upload-btn" class="primary">上传并检查</button><span id="session-label">尚未创建会话</span></div>
+    <p class="hint">原始文件按字节留存在本机，不覆盖源文件。刷新页面可恢复当前会话；重新上传会创建新会话。</p>
+  </section>
+  <section id="reading"><div class="section-title"><h2><b>02</b> 实际读取与检查</h2><span>所有统计来自真正读取的内容</span></div><div id="read-content" class="empty">上传后显示行数、列名、预览、空值、重复与读取异常。</div></section>
+  <section id="planning"><div class="section-title"><h2><b>03</b> 提出、修正清洗与关联方案</h2><button id="suggest-btn" disabled>请求真实模型建议</button></div>
+    <details><summary>语义分析配置入口</summary><p class="hint">复制项目中的 model_config.example.json 为 model_config.local.json，填写 endpoint、model 与 API 密钥环境变量名，启用后重启服务。也可通过 --model-config 指定文件。密钥只设置在服务端环境变量中，不在本页面填写。未配置时，使用下方统计候选与手动映射完成全部流程。</p></details>
+    <div id="questions" class="note">任务或数据有歧义时，先明确输出每行含义、字段对应、身份依据与重复判定。</div>
+    <div id="model-advice"></div>
+    <details><summary>统计候选对应（仅数据证据，不代表语义判断）</summary><div id="candidates"></div></details>
+    <div id="plan-editor" hidden>
+      <h3>字段映射与格式归一</h3><p class="hint">原字段必须全部保留。统一字段同名才表示你计划将它们视为同一字段；映射本身不表示同一对象或重复记录。格式转换须另行确认。</p><div id="mapping"></div>
+      <div class="two"><div><label for="row-meaning">输出每一行代表什么？<em>必填</em></label><input id="row-meaning" placeholder="例如：一个联系人；或一个客户的一次服务记录"></div><div><label for="mode">跨平台处理方式</label><select id="mode"><option value="keep">保留独立记录，不跨平台合并</option><option value="join">按确认依据关联；保留所有未匹配记录</option></select></div></div>
+      <div id="join-options"><div class="two"><div><label for="keys">关联字段或组合键（Ctrl/⌘多选，最多3个）</label><select id="keys" multiple size="4"></select></div><div><label for="link-basis">为什么这些字段足以识别同一对象/业务记录？</label><textarea id="link-basis" rows="4" placeholder="说明编号的作用域，或多个字段如何区分对象与不同业务记录；不确定时选择不关联。"></textarea></div></div></div>
+      <div class="two"><div><label for="dedupe">重复记录处理</label><select id="dedupe"><option value="keep">全部保留</option><option value="exact">文件内全部原字段原值一致：经确认后删冗余副本</option></select></div><div><label for="dedupe-basis">去重依据（选择去重时必填）</label><input id="dedupe-basis" placeholder="为什么这些完全相同行是冗余导出副本，而非多次有效记录？"></div></div>
+      <div class="actions"><button id="save-plan" class="primary">保存方案并检查</button><span id="plan-state"></span></div>
+    </div>
+    <details><summary>候选关联键的缺失与重复统计</summary><div id="key-candidates"></div></details>
+    <div id="analysis"></div>
+  </section>
+  <section id="confirmation"><div class="section-title"><h2><b>04</b> 核对并执行</h2><span>确认不会跳过数据与结构检查</span></div><div id="plan-summary" class="empty">请先编辑并保存方案。</div>
+    <div id="checks"><label><input type="checkbox" id="confirm-mapping">我已核对全部字段映射，确认同一统一字段表示同义</label><label><input type="checkbox" id="confirm-grain">我已明确每一行含义，并区分同一对象的不同业务记录</label><label><input type="checkbox" id="confirm-link">我已确认关联依据；缺键、一对多和冲突部分须保留待确认</label><label><input type="checkbox" id="confirm-dedupe">我已确认整行一致是冗余副本；允许删除副本并保留全部来源</label><label><input type="checkbox" id="confirm-transforms">我已确认所选格式转换的含义，原值继续保留在处理明细中</label></div>
+    <button id="execute-btn" class="primary" disabled>确认并执行当前方案</button>
+  </section>
+  <section id="results"><div class="section-title"><h2><b>05</b> 结果、待处理与追溯</h2><span id="result-revision"></span></div><div id="result-content" class="empty">尚未执行。这里不会显示模拟结果。</div><div id="downloads" class="actions" hidden></div></section>
+  <footer>本地最小版本 · CSV清洗与整合 · 原始数据持续保留</footer>
+</main><script src="/app.js"></script>
+</body></html>

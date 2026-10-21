@@ -7,3 +7,12 @@ reports/
 *.log
 .DS_Store
 Thumbs.db
+state/
+outputs/
+work/
+.env
+model_config.local.json
+runtime/
+dist/
+.env.*
+!.env.example

@@ -1,0 +1,15 @@
+{
+  "weights": {
+    "实验": "0.4",
+    "作业": "0.6"
+  },
+  "missing": {
+    "未交": {
+      "action": "zero"
+    }
+  },
+  "precision": 1,
+  "excellent_threshold": "90",
+  "excellent_denominator": "numeric",
+  "summary_field": "总评"
+}

@@ -2,27 +2,168 @@
   "version": "2.0.0",
   "tasks": [
     {
-      "label": "运行成绩整合示例",
+      "label": "双阶段：生成独立测试数据",
       "type": "process",
       "command": "python",
       "args": [
-        "-X", "utf8", "grade_agent.py",
-        "--platform-a", "inputs/platform_a.csv",
-        "--platform-b", "inputs/platform_b.csv",
-        "--rules", "inputs/rules.json",
-        "--output-dir", "runs/baseline"
+        "-X",
+        "utf8",
+        "tests/generate_two_stage.py"
       ],
-      "options": { "cwd": "${workspaceFolder}" },
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
       "problemMatcher": []
     },
     {
-      "label": "运行全部验收",
+      "label": "双阶段：验收已有样例",
       "type": "process",
       "command": "python",
-      "args": ["-X", "utf8", "run_acceptance.py"],
-      "options": { "cwd": "${workspaceFolder}" },
-      "group": { "kind": "test", "isDefault": true },
+      "args": [
+        "-X",
+        "utf8",
+        "tests/test_two_stage.py"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "group": {
+        "kind": "test",
+        "isDefault": true
+      },
       "problemMatcher": []
+    },
+    {
+      "label": "交互整合：启动本地界面",
+      "type": "process",
+      "command": "python",
+      "args": [
+        "-u",
+        "-X",
+        "utf8",
+        "app.py",
+        "--port",
+        "8765"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "交互整合：生成测试数据（仅测试）",
+      "type": "process",
+      "command": "python",
+      "args": [
+        "-X",
+        "utf8",
+        "tests/generate_fixtures.py"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "交互整合：验收已有测试数据",
+      "type": "process",
+      "command": "python",
+      "args": [
+        "-X",
+        "utf8",
+        "tests/test_interactive.py"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "group": {
+        "kind": "test",
+        "isDefault": false
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "处理已有CSV",
+      "type": "process",
+      "command": "python",
+      "args": [
+        "-X",
+        "utf8",
+        "grade_agent.py",
+        "--platform-a",
+        "${input:platformA}",
+        "--platform-b",
+        "${input:platformB}",
+        "--rules",
+        "${input:rulesFile}",
+        "--output-dir",
+        "${input:outputDirectory}"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "生成模拟数据（仅测试）",
+      "type": "process",
+      "command": "python",
+      "args": [
+        "-X",
+        "utf8",
+        "make_fixtures.py"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "生成模拟数据并验收",
+      "type": "process",
+      "command": "python",
+      "args": [
+        "-X",
+        "utf8",
+        "run_acceptance.py",
+        "--output-root",
+        "runs/acceptance"
+      ],
+      "dependsOn": [
+        "生成模拟数据（仅测试）"
+      ],
+      "dependsOrder": "sequence",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "group": {
+        "kind": "test",
+        "isDefault": false
+      },
+      "problemMatcher": []
+    }
+  ],
+  "inputs": [
+    {
+      "id": "platformA",
+      "type": "promptString",
+      "description": "已有平台A CSV路径（绝对路径或相对项目目录的路径）"
+    },
+    {
+      "id": "platformB",
+      "type": "promptString",
+      "description": "已有平台B CSV路径（绝对路径或相对项目目录的路径）"
+    },
+    {
+      "id": "rulesFile",
+      "type": "promptString",
+      "description": "已明确适用的规则JSON路径"
+    },
+    {
+      "id": "outputDirectory",
+      "type": "promptString",
+      "description": "汇总结果的输出目录",
+      "default": "runs/production"
     }
   ]
 }
