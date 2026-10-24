@@ -10,7 +10,7 @@ multi-platform-grade-agent/
   config/ docs/ .vscode/ .git/
   start.cmd VERSION README.md model_config.example.json
   state/ runtime/        受保护的历史状态及新状态
-  work/portable-server.*.log  正式服务仍占用，暂不迁移
+  work/                 若本机保留历史日志，则只在本机，不属Git或分发包
 ```
 
 项目旁的 `multi-platform-grade-agent-support/development` 保存唯一活动开发源码，`history` 保存原字节输出、日志、开发副本及嵌套Git，`migration` 保存原路径、目标、用途、Git来源、SHA、复制核对、原工作树和未提交差异。历史执行状态含绝对路径和引擎哈希，只归档，不修改后声称迁移成功。用途不明的state/runtime全部原位保留。
@@ -44,7 +44,7 @@ python -B -X utf8 .\dev.py package validation
 
 `isolated`只验证当前工作树白名单副本，不生成正式程序ZIP、不替代Git检查。正式包解压验收、另一台物理电脑和真实模型分别标记实际结果。
 
-原正式仓库会显示已迁跟踪文件删除，尚未提交；外置development的SOURCE_ORIGIN.json和迁移快照保留版本来源，后续可另纳入维护仓库，本轮不自动建仓、提交或推送。回滚先运行support的rollback工具dry-run；仅在内容仍匹配本轮记录时恢复，禁止覆盖后续新改动，不使用git reset/clean。
+历史整理阶段曾保留已迁文件的待提交删除；公开发布版已将这些删除及当前正式源码纳入发布提交。外置development的SOURCE_ORIGIN.json和迁移快照继续保留旧版本来源，未随运行包上传。回滚先运行support的rollback工具dry-run；仅在内容仍匹配本轮记录时恢复，禁止覆盖后续新改动，不使用git reset/clean。
 
 桌面入口为启动控制台.vbs及启动控制台.cmd，start.cmd命令行入口保留。secrets.local.json（明文）默认不创建，只有明确记住才保存，排除Git和所有包；详细说明见desktop_console.md。
 
