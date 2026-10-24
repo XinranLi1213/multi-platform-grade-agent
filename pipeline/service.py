@@ -369,6 +369,8 @@ class PipelineStore:
         state["suggestion"] = response
         if response["status"] != "ok":
             self.checkpoint(state, "understanding_error", [{"kind": "model", "reason": response["message"],
+                "code": response.get("code", "plan_validation"),
+                "attempts": response.get("attempts", 1),
                 "actions": ["重试理解", "展开修改理解，使用手动表单"], "impact": "本次指令尚未执行"}])
             return False
         proposal = response["proposal"]

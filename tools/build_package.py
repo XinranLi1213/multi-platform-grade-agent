@@ -11,7 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from tools.doctor import REQUIRED
 
-EXACT = {"LICENSE", "docs/release_validation.md", "tools/verify_demo.py", "tools/build_package.py", "VERSION", "app.py", "pipeline_cli.py", "start.cmd", "model_config.example.json", ".gitignore", ".gitattributes",
+EXACT = {"LICENSE", "docs/patch_031_validation.md", "docs/release_validation.md", "tools/verify_demo.py", "tools/build_package.py", "VERSION", "app.py", "pipeline_cli.py", "start.cmd", "model_config.example.json", ".gitignore", ".gitattributes",
          "启动控制台.vbs", "启动控制台.cmd", "tools/create_shortcut.vbs", "tools/desktop_console.py", "tools/console_core.py", "tools/console_worker.py", "tools/project_window.py", "docs/desktop_console.md", "config/README.md", "docs/windows_trial.md", "docs/agent_capabilities.md", "tools/__init__.py",
          "tools/doctor.py", "tools/launch.py", "grade_agent.py", "README.md", "docs/legacy_grades.md", "docs/two_stage.md", "docs/natural_language_pipeline.md", "docs/pipeline_teacher_ux.md", "docs/project_layout.md", "docs/workspace.md", "docs/intent_agent.md"}
 

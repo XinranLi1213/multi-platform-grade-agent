@@ -229,6 +229,7 @@ def suggest(config, state, instruction=None):
     messages = body["messages"]
     attempts = []
     for attempt in range(2):
+        transport_retry = False
         try:
             proposal = complete_json(config, messages)
             validated = validate_proposal(proposal, state)
@@ -248,6 +249,8 @@ def suggest(config, state, instruction=None):
             if exc.code not in ("json", "timeout", "connection") or attempt:
                 return {**exc.public(), "attempts": attempt + 1, "repairs": attempts}
             error = exc.message
+            transport_retry = exc.code in ("timeout", "connection")
+            transport_code = exc.code
         except PipelineError as exc:
             # Forged human decisions/evidence are rejected directly, never auto-confirmed.
             error = str(exc)[:1000]
@@ -258,6 +261,11 @@ def suggest(config, state, instruction=None):
             error = "方案字段类型或层级不符合约定"
             if attempt:
                 return {"status": "invalid", "code": "plan_validation", "message": error, "attempts": 2, "repairs": attempts}
+        if transport_retry:
+            # Retry inference only, with exactly the same context. A network
+            # failure provides no proposal to repair and no new authorization.
+            attempts.append({"action": "bounded_transport_retry", "code": transport_code, "reason": error})
+            continue
         attempts.append({"action": "bounded_plan_repair", "validation_error": error})
         # No invalid proposal is executed or installed. The original task/data remain in messages.
         previous = [{'role':'assistant','content':json.dumps(proposal,ensure_ascii=False)}] if 'proposal' in locals() else []
