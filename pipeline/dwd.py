@@ -230,6 +230,10 @@ def materialize(files, plan, directory):
                 if ratio >= .6 and (secondary_match or ident["name"] == master["name"]):
                     candidates.append({"student_id": candidate_id, "name_similarity": ratio,
                                        "secondary_matches": secondary_match, "secondary_conflict": secondary_conflict, "master": master})
+            if p.get('identity_policy') == 'unique_name_class':
+                exact = [cid for cid in exact if ident['class'] and entities[cid]['class'] == ident['class']]
+            if p.get('identity_policy') == 'hold':
+                exact = []
             if len(exact) == 1:
                 sid = exact[0]
                 identity_actions.append({"record_id": rid, "student_id": sid, "method": "unique_name_plus_secondary",

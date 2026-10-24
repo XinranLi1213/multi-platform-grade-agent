@@ -19,9 +19,17 @@ from pipeline.common import PipelineError
 from pipeline.service import PipelineStore, RevisionError
 
 WEB = Path(__file__).resolve().parent / "web"
+STATIC_PAGES = {
+    "/": "index.html",
+    "/app.js": "app.js",
+    "/style.css": "style.css",
+    "/pipeline": "pipeline.html",
+    "/pipeline.js": "pipeline.js",
+    "/semantic.js": "semantic.js",
+}
 
 
-def create_server(host="127.0.0.1", port=8765, state_dir="state", model_config=None):
+def create_server(host="127.0.0.1", port=8765, state_dir="state", model_config=None, instance_id=None):
     if host not in ("127.0.0.1", "localhost"):
         raise ValueError("试运行版只允许本机监听；另一台电脑请独立启动，不开放远程访问")
     store = SessionStore(state_dir, model_config)
@@ -58,26 +66,52 @@ def create_server(host="127.0.0.1", port=8765, state_dir="state", model_config=N
             try:
                 self.check_origin()
                 path = urllib.parse.urlparse(self.path)
-                if path.path in ("/", "/app.js", "/style.css", "/pipeline", "/pipeline.js", "/semantic.js"):
-                    name = {"/": "index.html", "/app.js": "app.js", "/style.css": "style.css", "/pipeline": "pipeline.html", "/pipeline.js": "pipeline.js", "/semantic.js": "semantic.js"}[path.path]
+                if path.path in STATIC_PAGES:
+                    name = STATIC_PAGES[path.path]
                     kind = "text/html" if name.endswith(".html") else "text/javascript" if name.endswith(".js") else "text/css"
                     return self.respond((WEB / name).read_bytes(), kind + "; charset=utf-8")
                 if path.path == "/api/config":
                     return self.respond({"model": model_status(store.model_config), "last_model_check": server.last_model_check,
                         "limits": {"files": 2, "max_mib": 2, "max_rows": 5000},
+                        "capabilities": {"conversation_schema_version": 1, "versioned_artifacts": True},
                         "pipeline_limits": {"min_files": 2, "max_files": 6, "max_mib": 2, "max_records": 5100}})
                 if path.path == "/api/health":
                     return self.respond({"status": "ok", "version": (WEB.parent / "VERSION").read_text(encoding="utf-8").strip(),
                         "python": sys.version.split()[0], "loopback_only": True,
-                        "model": model_status(store.model_config), "last_model_check": server.last_model_check})
+                        "model": model_status(store.model_config), "last_model_check": server.last_model_check,
+                        **({"instance_id": instance_id} if instance_id else {})})
                 parts = path.path.strip("/").split("/")
+                if parts == ["api", "pipelines"]:
+                    from pipeline.workspace import history
+                    return self.respond(history(pipelines))
                 if len(parts) >= 3 and parts[:2] == ["api", "pipelines"]:
                     if len(parts) == 3:
                         return self.respond(pipelines.load(parts[2]))
+                    if len(parts) == 4 and parts[3] == "conversation":
+                        return self.respond({"turns": pipelines.load(parts[2]).get("conversation", [])})
+                    if len(parts) == 7 and parts[3] == "artifacts" and parts[6] == "preview":
+                        from pipeline.conversation import preview
+                        return self.respond(preview(pipelines, parts[2], parts[4], parts[5]))
+                    if len(parts) == 6 and parts[3] == "artifacts":
+                        from pipeline.conversation import historical
+                        content, content_type, filename = historical(pipelines, parts[2], parts[4], parts[5])
+                        return self.respond(content, content_type, filename=filename)
                     if len(parts) == 4 and parts[3] == "download":
                         kind = urllib.parse.parse_qs(path.query).get("kind", ["audit"])[0]
-                        content, content_type, filename = pipelines.download(parts[2], kind)
+                        expected_revision = urllib.parse.parse_qs(path.query).get('revision',[None])[0]
+                        if kind == 'report' and expected_revision is None:
+                            raise RevisionError('下载处理说明需要指定流程版本，请刷新页面后重试')
+                        with pipelines.lock:
+                            content, content_type, filename = pipelines.download(parts[2], kind, int(expected_revision) if expected_revision is not None else None)
                         return self.respond(content, content_type, filename=filename)
+                    if len(parts) == 5 and parts[3] == "files":
+                        from pipeline.workspace import preview
+                        revision = int(urllib.parse.parse_qs(path.query).get("revision", [""])[0])
+                        return self.respond(preview(pipelines, parts[2], parts[4], revision))
+                    if len(parts) == 5 and parts[3] == "original":
+                        from pipeline.workspace import original
+                        content, filename = original(pipelines, pipelines.load(parts[2]), parts[4])
+                        return self.respond(content, "application/octet-stream", filename=filename)
                     return self.respond({"error": "双阶段接口不存在"}, status=404)
                 if len(parts) < 3 or parts[:2] != ["api", "sessions"]:
                     return self.respond({"error": "接口不存在"}, status=404)
@@ -108,8 +142,10 @@ def create_server(host="127.0.0.1", port=8765, state_dir="state", model_config=N
                 return self.respond({"error": str(exc)}, status=409)
             except PipelineError as exc:
                 return self.respond({"error": str(exc)}, status=422)
-            except StateError as exc:
+            except (StateError, ValueError, TypeError) as exc:
                 return self.respond({"error": str(exc)}, status=400)
+            except Exception as exc:
+                return self.respond({"error": "文件或任务暂时无法加载，原数据保留；请重试", "diagnostic": {"exception_type": type(exc).__name__}}, status=500)
 
         def do_POST(self):
             try:
@@ -138,34 +174,45 @@ def create_server(host="127.0.0.1", port=8765, state_dir="state", model_config=N
                         if len(content) > 2 * 1024 * 1024:
                             raise PipelineError("单份CSV不能超过2 MiB")
                         uploads.append((file["name"], content))
-                    return self.respond(pipelines.create(data.get("task"), uploads, data.get("plan"), data.get("rules")), status=201)
+                    return self.respond(pipelines.create(data.get("task"), uploads, data.get("plan"), data.get("rules"), data.get("request_id")), status=201)
                 if len(parts) == 4 and parts[:2] == ["api", "pipelines"]:
-                    run_id, action = parts[2], parts[3]
-                    if action == "suggest":
-                        result = pipelines.suggest(run_id, data.get("revision"))
-                    elif action == "instruct":
-                        result = pipelines.instruct(run_id, data.get("revision"), data.get("instruction"),
-                                                    data.get("mode", "execute"), data.get("request_id"))
-                    elif action == "adopt-trial":
-                        result = pipelines.adopt_trial(run_id, data.get("revision"))
-                    elif action == "resolve":
-                        result = pipelines.resolve(run_id, data.get("revision"), data.get("decision"))
-                    elif action == "layout":
-                        result = pipelines.inspect_layout(run_id, data.get("revision"), data.get("file_id"), data.get("header_line"))
-                    elif action == "check-rules":
-                        result = pipelines.check_rules(run_id, data.get("revision"), data.get("rules"))
-                    elif action == "prepare-rules":
-                        result = pipelines.prepare_rules(run_id, data.get("revision"), data.get("rules"))
-                    elif action == "preview-plan":
-                        result = pipelines.preview_plan(run_id, data.get("revision"), data.get("plan"))
-                    elif action == "apply-plan":
-                        result = pipelines.apply_plan(run_id, data.get("revision"), data.get("plan"), data.get("confirmation"), data.get("reason"))
-                    elif action in ("resume", "trial"):
-                        result = pipelines.resume(run_id, data.get("revision"), data.get("plan"), data.get("rules"),
-                                                  data.get("instruction"), trial=action == "trial", reason=data.get("reason"))
-                    else:
-                        return self.respond({"error": "双阶段动作不存在"}, status=404)
-                    return self.respond(result)
+                    with pipelines.lock:
+                        run_id, action = parts[2], parts[3]
+                        from pipeline.conversation import replay, record_request
+                        tracked = action in ('resolve','resume','trial','apply-plan','adopt-trial','answer-question','question-options')
+                        if tracked:
+                            prior = replay(pipelines, run_id, action, data)
+                            if prior is not None:return self.respond(prior)
+                        if action == "suggest":
+                            result = pipelines.suggest(run_id, data.get("revision"))
+                        elif action == "instruct":
+                            result = pipelines.instruct(run_id, data.get("revision"), data.get("instruction"),
+                                                        data.get("mode", "execute"), data.get("request_id"))
+                        elif action == "adopt-trial":
+                            result = pipelines.adopt_trial(run_id, data.get("revision"))
+                        elif action == "resolve":
+                            result = pipelines.resolve(run_id, data.get("revision"), data.get("decision"))
+                        elif action == "answer-question":
+                            result = pipelines.answer_question(run_id, data.get("revision"), data.get("answer"))
+                        elif action == 'question-options':
+                            result = pipelines.question_options(run_id,data.get('revision'),data.get('issue_id'))
+                        elif action == "layout":
+                            result = pipelines.inspect_layout(run_id, data.get("revision"), data.get("file_id"), data.get("header_line"))
+                        elif action == "check-rules":
+                            result = pipelines.check_rules(run_id, data.get("revision"), data.get("rules"))
+                        elif action == "prepare-rules":
+                            result = pipelines.prepare_rules(run_id, data.get("revision"), data.get("rules"))
+                        elif action == "preview-plan":
+                            result = pipelines.preview_plan(run_id, data.get("revision"), data.get("plan"))
+                        elif action == "apply-plan":
+                            result = pipelines.apply_plan(run_id, data.get("revision"), data.get("plan"), data.get("confirmation"), data.get("reason"),data.get('answered_issue_id'))
+                        elif action in ("resume", "trial"):
+                            result = pipelines.resume(run_id, data.get("revision"), data.get("plan"), data.get("rules"),
+                                                      data.get("instruction"), trial=action == "trial", reason=data.get("reason"),answered_issue_id=data.get('answered_issue_id'))
+                        else:
+                            return self.respond({"error": "双阶段动作不存在"}, status=404)
+                        if tracked:record_request(pipelines, result, action, data)
+                        return self.respond(result)
                 if parts == ["api", "sessions"]:
                     uploads = data.get("files")
                     if not isinstance(uploads, list) or len(uploads) != 2:

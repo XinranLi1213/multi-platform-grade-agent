@@ -27,6 +27,8 @@ def validate_plan(state, plan):
     records = {r["record_id"]: r for t in layouts for r in t["rows"]}
     metrics = set()
     for p in specs:
+        if p.get('identity_policy', 'legacy') not in ('legacy', 'unique_name_class', 'hold'):
+            raise InputProblem('缺编号关联方式无效', 'mapping', file_id=p.get('file_id'))
         t = by_file[p["file_id"]]
         context = {"file_id": p["file_id"], "file_name": t["name"]}
         grain = p.get("record_grain", [])

@@ -2,48 +2,28 @@
   "version": "2.0.0",
   "tasks": [
     {
-      "label": "双阶段：生成独立测试数据",
+      "label": "启动本机教师页面",
       "type": "process",
       "command": "python",
       "args": [
-        "-X",
-        "utf8",
-        "tests/generate_two_stage.py"
-      ],
-      "options": {
-        "cwd": "${workspaceFolder}"
-      },
-      "problemMatcher": []
-    },
-    {
-      "label": "双阶段：验收已有样例",
-      "type": "process",
-      "command": "python",
-      "args": [
-        "-X",
-        "utf8",
-        "tests/test_two_stage.py"
-      ],
-      "options": {
-        "cwd": "${workspaceFolder}"
-      },
-      "group": {
-        "kind": "test",
-        "isDefault": true
-      },
-      "problemMatcher": []
-    },
-    {
-      "label": "交互整合：启动本地界面",
-      "type": "process",
-      "command": "python",
-      "args": [
+        "-B",
         "-u",
         "-X",
         "utf8",
-        "app.py",
-        "--port",
-        "8765"
+        "tools/launch.py"
+      ],
+      "problemMatcher": []
+    },
+    {
+      "label": "开发：核对案例",
+      "type": "process",
+      "command": "python",
+      "args": [
+        "-B",
+        "-X",
+        "utf8",
+        "${workspaceFolder}/../multi-platform-grade-agent-support/dev.py",
+        "verify-data"
       ],
       "options": {
         "cwd": "${workspaceFolder}"
@@ -51,13 +31,16 @@
       "problemMatcher": []
     },
     {
-      "label": "交互整合：生成测试数据（仅测试）",
+      "label": "开发：全部验收",
       "type": "process",
       "command": "python",
       "args": [
+        "-B",
         "-X",
         "utf8",
-        "tests/generate_fixtures.py"
+        "${workspaceFolder}/../multi-platform-grade-agent-support/dev.py",
+        "test",
+        "all"
       ],
       "options": {
         "cwd": "${workspaceFolder}"
@@ -65,20 +48,35 @@
       "problemMatcher": []
     },
     {
-      "label": "交互整合：验收已有测试数据",
+      "label": "开发：生成新数据",
       "type": "process",
       "command": "python",
       "args": [
+        "-B",
         "-X",
         "utf8",
-        "tests/test_interactive.py"
+        "${workspaceFolder}/../multi-platform-grade-agent-support/dev.py",
+        "generate",
+        "two-stage"
       ],
       "options": {
         "cwd": "${workspaceFolder}"
       },
-      "group": {
-        "kind": "test",
-        "isDefault": false
+      "problemMatcher": []
+    },
+    {
+      "label": "开发：独立浏览器服务",
+      "type": "process",
+      "command": "python",
+      "args": [
+        "-B",
+        "-X",
+        "utf8",
+        "${workspaceFolder}/../multi-platform-grade-agent-support/dev.py",
+        "serve-browser"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
       },
       "problemMatcher": []
     },
@@ -87,6 +85,7 @@
       "type": "process",
       "command": "python",
       "args": [
+        "-B",
         "-X",
         "utf8",
         "grade_agent.py",
@@ -101,44 +100,6 @@
       ],
       "options": {
         "cwd": "${workspaceFolder}"
-      },
-      "problemMatcher": []
-    },
-    {
-      "label": "生成模拟数据（仅测试）",
-      "type": "process",
-      "command": "python",
-      "args": [
-        "-X",
-        "utf8",
-        "make_fixtures.py"
-      ],
-      "options": {
-        "cwd": "${workspaceFolder}"
-      },
-      "problemMatcher": []
-    },
-    {
-      "label": "生成模拟数据并验收",
-      "type": "process",
-      "command": "python",
-      "args": [
-        "-X",
-        "utf8",
-        "run_acceptance.py",
-        "--output-root",
-        "runs/acceptance"
-      ],
-      "dependsOn": [
-        "生成模拟数据（仅测试）"
-      ],
-      "dependsOrder": "sequence",
-      "options": {
-        "cwd": "${workspaceFolder}"
-      },
-      "group": {
-        "kind": "test",
-        "isDefault": false
       },
       "problemMatcher": []
     }
@@ -162,8 +123,7 @@
     {
       "id": "outputDirectory",
       "type": "promptString",
-      "description": "汇总结果的输出目录",
-      "default": "runs/production"
+      "description": "汇总结果的输出目录"
     }
   ]
 }

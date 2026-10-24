@@ -3,8 +3,8 @@
 正式入口仍为Python标准库的app.py，页面为原生HTML/CSS/JavaScript。没有新增Web框架、文件格式或平台API。DWD与DWS仍由各自生成的确定性Python执行器独立执行，CSV、manifest、原始字节、审计和历史版本继续保留。
 
 ```powershell
-Set-Location 'D:\programs\multi-platform-grade-agent'
-python -u -X utf8 app.py --port 8765
+# 在解压后的正式程序目录执行
+python -B -u -X utf8 tools/launch.py
 # 打开 http://127.0.0.1:8765/pipeline
 ```
 
@@ -43,26 +43,26 @@ python -u -X utf8 app.py --port 8765
 实际验收命令（测试生成器与入口完全独立）：
 
 ```powershell
-python -X utf8 tests/prepare_teacher_fixtures.py
-python -X utf8 tests/test_teacher_pipeline.py
-python -X utf8 tests/test_two_stage.py
-python -X utf8 tests/test_interactive.py
+python -B -X utf8 ../multi-platform-grade-agent-support/dev.py verify-data
+python -B -X utf8 ../multi-platform-grade-agent-support/development/tests/test_teacher_pipeline.py
+python -B -X utf8 ../multi-platform-grade-agent-support/development/tests/test_two_stage.py
+python -B -X utf8 ../multi-platform-grade-agent-support/development/tests/test_interactive.py
 
 # 独立终端启动真实浏览器验收服务；仅此测试启动器支持一次性未知故障注入
-python -u -X utf8 tests/serve_teacher_browser.py
+python -B -u -X utf8 ../multi-platform-grade-agent-support/dev.py serve-browser
 $env:INTEGRATION_TEST_URL = 'http://127.0.0.1:8766'
-node tests/two_stage_browser.cjs
-node tests/checkpoint_browser.cjs
+node ../multi-platform-grade-agent-support/development/tests/two_stage_browser.cjs
+node ../multi-platform-grade-agent-support/development/tests/checkpoint_browser.cjs
 
 # 原通用CSV工作台的浏览器回归，使用正式8765服务
 $env:INTEGRATION_TEST_URL = 'http://127.0.0.1:8765'
-node tests/browser_acceptance.cjs
+node ../multi-platform-grade-agent-support/development/tests/browser_acceptance.cjs
 ```
 
-本轮优先只读桌面“多平台试用数据_20261021_163831”的三组文件；测试另有副本tests/teacher_trial_data，原文件运行前后SHA-256保持一致。其余冲突与主表外案例读取原独立tests/two_stage_data模拟CSV。正式app.py不导入测试数据或故障注入器。
+案例已统一为独立验证资料，不再定位桌面；原来源记录仍保留。测试读取独立验证资料README中的01、02、03各组输入文件，原文件运行前后SHA-256保持一致。其余冲突与主表外案例读取原独立../multi-platform-grade-agent-validation/cases/05_双阶段三人及异常变体/输入文件模拟CSV。正式app.py不导入测试数据或故障注入器。
 
-完整逐项预期、实际结果、产物位置与未运行项见 [本轮实际报告](../outputs/teacher_ux_acceptance.md)。原始机器报告：outputs/teacher_backend_acceptance.json、outputs/two_stage_browser.json、outputs/two_stage_acceptance.json、outputs/interactive_acceptance.json、outputs/browser_acceptance.json。截图仅辅助视觉核对，验收依据还包括真实点击、HTTP状态、版本变化和实际下载内容。
+完整逐项预期、实际结果、产物位置与未运行项见 [本轮实际报告](../../multi-platform-grade-agent-support/history/outputs/teacher_ux_acceptance.md)。历史机器报告：support/history/outputs/teacher_backend_acceptance.json、outputs/two_stage_browser.json、outputs/two_stage_acceptance.json、outputs/interactive_acceptance.json、outputs/browser_acceptance.json。截图仅辅助视觉核对，验收依据还包括真实点击、HTTP状态、版本变化和实际下载内容。
 
-待确认与规则保存修复的最新专项报告：[checkpoint_fixed_acceptance.md](../outputs/checkpoint_fixed_acceptance.md)。专项浏览器脚本实际覆盖8组诊断操作，另有后端校验、补时间排序和审计检查。人工时间补充保存在plan.timestamp_resolutions，原上传与原始values不修改；实际转换进入阶段一audit.json的conversions。
+待确认与规则保存修复的最新专项报告：[checkpoint_fixed_acceptance.md](../../multi-platform-grade-agent-support/history/outputs/checkpoint_fixed_acceptance.md)。专项浏览器脚本实际覆盖8组诊断操作，另有后端校验、补时间排序和审计检查。人工时间补充保存在plan.timestamp_resolutions，原上传与原始values不修改；实际转换进入阶段一audit.json的conversions。
 
 当前限制与未运行：没有配置真实LLM，因此真实模型联网与语义质量未运行；没有使用固定回复冒充模型。复杂条件仍使用高级受限公式JSON或真实模型建议，常见权重/状态/归并不依赖JSON。仅CSV、2至6份、单份2 MiB，latest时间需ISO格式；未扩展Excel、PDF、平台API、多用户权限或大数据并发。浏览器实际验证采用Windows Edge；其他浏览器、移动端和真实教学生产数据未验证。来源在卡片及完整审计中，主宽表维持每行一个编号而不把所有提交来源塞进单个CSV格子。

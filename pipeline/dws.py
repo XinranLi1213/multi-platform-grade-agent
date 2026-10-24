@@ -380,8 +380,9 @@ def generate_and_run(manifest_path, expected_hash, rules, output_dir, baseline=N
     code = output_dir / "calculation.py"
     code.write_text(script, encoding="utf-8", newline="\n")
     try:
-        process = subprocess.run([sys.executable, "-I", "-X", "utf8", str(code)], cwd=output_dir,
-                                 capture_output=True, text=True, encoding="utf-8", timeout=30)
+        process = subprocess.run([sys.executable, "-I", "-B", "-X", "utf8", str(code)], cwd=output_dir,
+                                 stdin=subprocess.DEVNULL, capture_output=True, text=True, encoding="utf-8", timeout=30,
+                                 creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
     except subprocess.TimeoutExpired:
         dump(output_dir / "failure.json", {"reason": "隔离Python计算超过30秒，未交付成功结果"})
         from .common import ExecutionFault
@@ -397,7 +398,7 @@ def generate_and_run(manifest_path, expected_hash, rules, output_dir, baseline=N
     result.update(status="checkpoint" if result["failures"] else "complete", directory=str(output_dir),
                   generated_code_sha256=sha(code), output_sha256=sha(output_dir / "output.csv"), rules_sha256=rules_hash,
                   engine_hashes=engine_hashes, python_version=sys.version,
-                  command=[sys.executable, "-I", "-X", "utf8", str(code)])
+                  command=[sys.executable, "-I", "-B", "-X", "utf8", str(code)])
     dump(output_dir / "execution.json", {key: result[key] for key in ("status", "generated_code_sha256", "output_sha256", "rules_sha256", "engine_hashes", "python_version", "command", "dwd_manifest_sha256")})
     return result
 

@@ -1,0 +1,12 @@
+[
+  {
+    "file": "平台记录.csv",
+    "source": "validation/08_Windows手动试运行/输入文件/平台记录.csv",
+    "sha256": "2b88fa665ba4ba373c0bf563e5e1f608a3baf9886a232d33a6d17d284d02d9b0"
+  },
+  {
+    "file": "花名册.csv",
+    "source": "validation/08_Windows手动试运行/输入文件/花名册.csv",
+    "sha256": "61e8eec3d736f526d0e1eab216a74bde72832aff6d450e064e3da60e7b46e919"
+  }
+]

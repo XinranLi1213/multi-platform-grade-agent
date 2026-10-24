@@ -6,6 +6,7 @@ import subprocess
 import sys
 import threading
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 
 from .common import PipelineError, InputProblem, ExecutionFault, csv_bytes, dump, sha
@@ -14,6 +15,7 @@ from .ingest import parse_file, suggest_plan
 from .rules import infer_rules, compile_rules
 from .interaction import validate_plan, presentation, plan_diff, token, issue_key, issue_guidance
 from .semantic import fingerprint, profiles
+from .intent import calculation_requested, wants_calculation
 from integration.models import model_status
 
 
@@ -33,16 +35,35 @@ class PipelineStore:
             raise PipelineError("无效流程编号")
         return self.root / run_id
 
+    def remember_business_facts(self, state, instruction):
+        """Keep explicit future policies without turning data cleaning into scoring."""
+        metrics = {m["target"] for p in state["plan"]["platforms"] for m in p.get("metrics", [])}
+        try:
+            parsed = infer_rules(instruction, metrics)
+        except PipelineError:
+            return  # Original instruction remains available for later conflict questions.
+        facts = state.setdefault("known_business_facts", {})
+        for key, value in parsed.items():
+            if key == "source_instruction" or key == "missing" and not value:
+                continue
+            facts[key] = {**facts.get(key, {}), **value} if key == "missing" else copy.deepcopy(value)
+
     def load(self, run_id):
         path = self.directory(run_id) / "workflow.json"
         if not path.exists():
             raise PipelineError("流程不存在")
         with self.lock:
             state = json.loads(path.read_text(encoding="utf-8"))
+            state.setdefault("updated_at", datetime.fromtimestamp(path.stat().st_mtime, timezone.utc).isoformat())
             state.setdefault("instructions", [{"id": "initial", "text": state["task"], "mode": "execute"}])
             state.setdefault("decisions", [])
             state.setdefault("accepted_result", copy.deepcopy(state.get("last_successful_trial")))
             state.setdefault("requests", {})
+            state.setdefault("calculation_requested", wants_calculation(state))
+            if "known_business_facts" not in state:
+                state["known_business_facts"] = {}
+                for item in state["instructions"]:
+                    self.remember_business_facts(state, item["text"])
             run_root = self.directory(run_id).resolve()
             artifacts = [state.get("stage1"), state.get("stage2"), state.get("accepted_result"), *state.get("trials", [])]
             foreign = any(a and a.get("directory") and not Path(a["directory"]).resolve().is_relative_to(run_root) for a in artifacts)
@@ -53,17 +74,33 @@ class PipelineStore:
                 state.update(phase="migration_required", stage1=None, stage2=None, accepted_result=None,
                     migration_required=True, issues=[{"kind": "migration", "reason": "检测到历史状态引用其他目录。此状态仅供归档查看；请用原始CSV和已知规则在本机重新运行，旧调整基准不能自动替换。",
                         "required_input": "在上方重新选择原始CSV创建新流程；旧文件与审计保留"}])
+            if (not wants_calculation(state) and (state.get("stage1") or {}).get("status") == "ready"
+                    and state["phase"] == "business_checkpoint"
+                    and all(q.get("kind") in ("business_rule", "missing_policy") for q in state.get("issues", []))):
+                # Read-only compatibility for old workflows forced into DWS.
+                # The persisted events/revision/hashes remain untouched.
+                state.update(phase="organized", issues=[], stage2=None)
             state["view"] = presentation(state)
             return state
 
     def save(self, state):
+        path = self.directory(state["id"]) / "workflow.json"
+        previous = json.loads(path.read_text(encoding="utf-8")) if path.exists() else None
+        now = datetime.now(timezone.utc).isoformat()
+        if previous is None:
+            state.setdefault("created_at", now)
+        state["updated_at"] = (previous.get("updated_at") or datetime.fromtimestamp(path.stat().st_mtime, timezone.utc).isoformat()) if previous and previous["revision"] == state["revision"] else now
         state["semantic_plan"] = {"schema_version": 1, "revision": state["revision"],
+            "calculation_requested": wants_calculation(state),
+            "known_business_facts": copy.deepcopy(state.get("known_business_facts", {})),
             "data_plan": copy.deepcopy(state["plan"]), "business_rules": copy.deepcopy(state.get("rules")),
             "business_draft": copy.deepcopy(state.get("business_draft")),
             "decisions": copy.deepcopy(state.get("decisions", [])),
             "instruction_ids": [i["id"] for i in state.get("instructions", [])]}
         state["semantic_plan"]["dwd_manifest_sha256"] = (state.get("stage1") or {}).get("manifest_sha256")
         state["view"] = presentation(state)
+        from .conversation import capture
+        capture(state)
         directory = self.directory(state["id"])
         dump(directory / "semantic" / f"v{state['revision']}.json", state["semantic_plan"])
         dump(directory / "workflow.tmp", state)
@@ -76,6 +113,8 @@ class PipelineStore:
             raise RevisionError("流程版本已变化，请刷新后使用当前版本继续")
 
     def checkpoint(self, state, phase, issues):
+        if phase == 'data_checkpoint' and state.get('pending_clarifications'):
+            issues = issues + [q for q in state['pending_clarifications'] if q.get('id') not in {i.get('id') for i in issues}]
         prompts = {"identity": ("选择主花名册编号并填写核对依据，或继续待确认", ["核对身份", "继续待确认"]),
             "deduplication": ("补充可核对的提交信息、明确裁决值或调整归并策略", ["填写裁决值与依据", "调整数据整理方式"]),
             "scale": ("明确原始满分、等级对应关系或裁决依据", ["调整分制", "填写裁决值与依据"]),
@@ -83,8 +122,9 @@ class PipelineStore:
             "reading": ("核对实际表头和原始文件结构", ["调整数据整理方式", "检查原始CSV"]),
             "missing_policy": ("明确该状态是否记0、保留标识或按明确值折算", ["补充状态处理规则"]),
             "business_rule": ("补充完整权重或明确计算公式", ["填写计算规则表单", "提供明确追加指令"]),
-            "system": ("无需补充业务规则，可重试或查看诊断", ["重试", "展开诊断信息"])}
-        issues = [{"status": "本次暂停，原始上传保留", "impact": "相关记录待处理，阶段二尚未完成",
+            "system": ("无需补充业务规则，可重试或在本机控制台查看诊断", ["重试", "在本机控制台查看诊断"])}
+        impact = "相关记录待处理，阶段二尚未完成" if wants_calculation(state) else "本次整理要求尚未完成，原始上传保留"
+        issues = [{"status": "本次暂停，原始上传保留", "impact": impact,
                    "required_input": prompts.get(q.get("kind"), ("核对对应字段设置", []))[0],
                    "actions": prompts.get(q.get("kind"), ("", ["调整数据整理方式"]))[1], **q} for q in issues]
         state.update(phase=phase, issues=issues, stage2=None)
@@ -120,9 +160,11 @@ class PipelineStore:
             "    sys.exit(2)\n"
             "dump(OUT + '/stage1_result.json', result)\n")
         code.write_text(script, encoding="utf-8", newline="\n")
-        command = [sys.executable, "-I", "-X", "utf8", str(code)]
+        command = [sys.executable, "-I", "-B", "-X", "utf8", str(code)]
         try:
-            process = subprocess.run(command, cwd=destination, capture_output=True, text=True, encoding="utf-8", timeout=30)
+            process = subprocess.run(command, cwd=destination, stdin=subprocess.DEVNULL, capture_output=True,
+                                     text=True, encoding="utf-8", timeout=30,
+                                     creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
         except subprocess.TimeoutExpired:
             dump(destination / "failure.json", {"reason": "阶段一Python执行超过30秒"})
             raise ExecutionFault("数据整理执行超时，请重试；上传数据已保留")
@@ -131,7 +173,7 @@ class PipelineStore:
             if process.returncode == 2 and (destination / "input_problem.json").exists():
                 problem = json.loads((destination / "input_problem.json").read_text(encoding="utf-8"))
                 raise InputProblem(problem["reason"], problem["kind"], actions=problem["actions"])
-            raise ExecutionFault("数据整理程序执行失败，请重试或展开诊断信息；上传数据已保留")
+            raise ExecutionFault("数据整理程序执行失败，请重试或在本机控制台查看诊断；上传数据已保留")
         state["stage1"] = json.loads((destination / "stage1_result.json").read_text(encoding="utf-8"))
         state["stage1"].update(command=command, generated_code_sha256=sha(code))
         dump(destination / "execution.json", {"command": command, "code_sha256": sha(code),
@@ -162,12 +204,20 @@ class PipelineStore:
             latest = max(candidates, key=lambda p: p.stat().st_mtime_ns)
             state["diagnostic"]["worker_report"] = json.loads(latest.read_text(encoding="utf-8"))
         self.checkpoint(state, "system_error", [{"kind": "system", "reason": "程序执行未完成，请重试；原始上传与已保存的方案仍在。",
-            "impact": "本次没有可用计算结果", "actions": ["重试", "展开诊断信息"]}])
+            "impact": "本次没有可用计算结果", "actions": ["重试", "在本机控制台查看诊断"]}])
 
     def stage_two(self, state, rules=None, instruction=None, trial=False):
+        if state.get('pending_clarifications'):
+            self.checkpoint(state,'understanding_checkpoint',state['pending_clarifications'])
+            return
         stage1 = state.get("stage1")
         if not stage1 or stage1["status"] != "ready":
             self.checkpoint(state, "data_checkpoint", stage1["issues"] if stage1 else [{"reason": "阶段一尚未产出ready宽表"}])
+            return
+        if not wants_calculation(state):
+            state.update(phase="organized", issues=[], stage2=None)
+            state["events"].append({"action": "data_only_complete", "revision": state["revision"],
+                                    "dwd_manifest_sha256": stage1["manifest_sha256"]})
             return
         manifest = Path(stage1["directory"]) / "manifest.json"
         try:
@@ -177,7 +227,7 @@ class PipelineStore:
                 raise ExecutionFault(str(exc)) from exc
             previous = state.get("last_successful_trial")
             if rules is None:
-                base = (state.get("rules") or (previous["rules"] if previous else None)) if instruction else None
+                base = (state.get("rules") or state.get("known_business_facts") or (previous["rules"] if previous else None)) if instruction else state.get("known_business_facts")
                 rules = infer_rules(instruction or state["task"], data["metrics"], base)
             state["rules"] = rules
             trial_id = len(state["trials"]) + 1
@@ -251,10 +301,23 @@ class PipelineStore:
         except Exception as exc:
             self.fault(state, exc, "DWS")
 
-    def create(self, task, uploads, plan=None, rules=None):
+    def create(self, task, uploads, plan=None, rules=None, request_id=None):
         if not isinstance(task, str) or not 0 < len(task.strip()) <= 10000 or not 2 <= len(uploads) <= 6:
             raise PipelineError("需要任务描述和2至6份CSV（可包含主花名册）")
         with self.lock:
+            from .semantic import fingerprint
+            import hashlib
+            request_hash = fingerprint({'task':task,'uploads':[(n,hashlib.sha256(c).hexdigest()) for n,c in uploads],'plan':plan,'rules':rules})
+            if request_id is not None:
+                if not isinstance(request_id,str) or not 0<len(request_id)<=128:raise InputProblem('请求标识无效')
+                for path in self.root.glob('*/workflow.json'):
+                    try:existing=json.loads(path.read_text(encoding='utf-8'))
+                    except (OSError,ValueError):continue
+                    if not isinstance(existing,dict):continue
+                    prior=existing.get('initial_request',{})
+                    if prior.get('id')==request_id:
+                        if prior['hash']!=request_hash:raise InputProblem('同一请求标识不能提交不同内容')
+                        return self.load(existing['id'])
             run_id = uuid.uuid4().hex
             directory = self.directory(run_id)
             (directory / "input").mkdir(parents=True)
@@ -264,16 +327,19 @@ class PipelineStore:
                 (directory / "input" / (file_id + ".original")).write_bytes(content)
                 files.append(parse_file(file_id, filename, content))
             state = {"id": run_id, "task": task, "revision": 1, "files": files,
+                "initial_request": {"id":request_id,"hash":request_hash},
                 "plan": plan or suggest_plan(files, task), "rules": rules, "stage1": None, "stage2": None,
                 "trials": [], "last_successful_trial": None, "events": [], "issues": [], "phase": "reading", "suggestion": None,
                 "instructions": [{"id": "initial", "text": task, "mode": "execute"}], "decisions": [],
-                "accepted_result": None, "requests": {}}
+                "accepted_result": None, "requests": {},
+                "calculation_requested": rules is not None or calculation_requested(task)}
+            self.remember_business_facts(state, task)
             if model_status(self.model_config)["enabled"] and plan is None and rules is None:
                 if not self.understand(state, task):
                     self.save(state)
                     return state
                 rules = state.get("rules")
-            if rules is None:
+            if rules is None and wants_calculation(state):
                 try:
                     metrics = list({m["target"] for p in state["plan"]["platforms"] for m in p["metrics"]})
                     state["rules"] = infer_rules(task, metrics)
@@ -333,11 +399,114 @@ class PipelineStore:
         state["decisions"].append({"source": state["instructions"][-1]["id"], "instruction": instruction,
             "rationale": proposal["rationale"], "evidence": proposal.get("evidence", []), "rules": copy.deepcopy(state.get("rules")), "revision": state["revision"]})
         if proposal["questions"]:
-            self.checkpoint(state, "understanding_checkpoint", [{"id": f"S{i}", "kind": "semantic", "reason": question,
-                "required_input": "在上方任务框补充此问题，已有规则继续沿用", "actions": ["补充指令", "修改理解"]}
-                for i, question in enumerate(proposal["questions"], 1)])
+            from .clarifications import checkpoint_questions
+            pending = checkpoint_questions(proposal['questions'],state)
+            if any(q.get('clarification') for q in pending):state['pending_clarifications']=pending
+            self.checkpoint(state, "understanding_checkpoint", pending)
             return False
+        state.pop('pending_clarifications',None)
         return True
+
+    def answer_question(self, run_id, revision, answer):
+        from .clarifications import apply_choice, checkpoint_questions, normalize, question_input
+        if not isinstance(answer,dict) or set(answer)-{'issue_id','choice_id','text','parameters','reason'}:
+            raise InputProblem('问题答案结构无效','semantic')
+        with self.lock:
+            state=self.load(run_id);self.check(state,revision)
+            issue=next((q for q in state['issues'] if q.get('id')==answer.get('issue_id') and q.get('kind')=='semantic'),None)
+            if issue is None: raise InputProblem('此问题已变化，请刷新后重新选择','semantic')
+            choice=answer.get('choice_id');text=answer.get('text','');followups=[];before=copy.deepcopy(state['plan'])
+            selected=None
+            if issue.get('clarification',{}).get('source')=='model' and choice not in ('custom','pending'):
+                fresh=normalize(question_input(issue['clarification']),state)
+                if fresh['binding']!=issue['clarification']['binding']:raise InputProblem('选项所依据的数据方案已变化，请重新生成选项','semantic')
+                selected=next((c for c in fresh['choices'] if c['id']==choice),None)
+                accepts_max=selected and selected['decision']=={'kind':'scale','mode':'points'}
+                if selected is None or answer.get('parameters') and not accepts_max:raise InputProblem('请选择此问题的有效选项，不接受额外操作参数','semantic')
+            needs_understanding=choice=='custom' or bool(selected and selected['decision']['kind']=='interpret')
+            last=(state.get('clarification_answers') or [{}])[-1]
+            if choice=='pending' and last.get('issue_id')==issue['id'] and last.get('choice_id')=='pending':
+                return {**state,'feedback':{'message':'此问题仍待确认，记录已保留，没有重复保存。'}}
+
+            remaining=[q for q in state['issues'] if q is not issue]
+            if needs_understanding:
+                if selected:text=selected['label']
+                if not isinstance(text,str) or not text.strip() or len(text)>10000: raise InputProblem('请填写自定义处理方式','semantic')
+                instruction='针对问题“'+issue['reason']+'”：'+text.strip()
+            elif choice=='pending':
+                instruction='继续待确认：'+issue['reason']
+                remaining=state['issues']
+            else:
+                if 'clarification' not in issue: raise InputProblem('此旧问题暂不提供预设选项，请自定义补充','semantic')
+                plan,followups=apply_choice(state,issue,choice,answer.get('parameters',{}))
+                state['plan']=plan
+                label=next(c['label'] for c in issue['clarification']['choices'] if c['id']==choice)
+                instruction=issue['reason']+'；教师选择：'+label
+                if answer.get('parameters'): instruction+='；原始满分：'+str(answer['parameters'].get('max_score',''))
+            state['revision']+=1;state['stage2']=None
+            state['instructions'].append({'id':uuid.uuid4().hex,'text':instruction,'mode':'execute'})
+            state.setdefault('clarification_answers',[]).append({'issue_id':issue['id'],'question':issue['reason'],'choice_id':choice,'text':text,'selected_option':copy.deepcopy(selected),'parameters':answer.get('parameters',{}),'revision':state['revision'],'status':'pending' if choice=='pending' else 'submitted'})
+            state['events'].append({'action':'clarification_answer','instruction':instruction,'revision':state['revision']})
+            error_phase=None
+            if needs_understanding:
+                if model_status(self.model_config)['enabled']:
+                    understood=self.understand(state,instruction)
+                    if not understood:
+                        remaining+=state['issues']
+                        if state['phase'] in ('understanding_error','system_error'):error_phase=state['phase']
+                else:
+                    remaining.append(issue)
+                    state['feedback']={'message':'自定义内容已保存；语义模型未启用，请使用中文整理或规则表单补充。'}
+            remaining+=checkpoint_questions([normalize(q,state) for q in followups],state)
+            unique={q.get('id') or q['reason']:q for q in remaining}
+            # Rebind unanswered typed cards to current real fields after a related choice.
+            for q in unique.values():
+                if q.get('clarification'):
+                    old=q['clarification']
+                    if old.get('source')=='model':
+                        try:
+                            fresh=normalize(question_input(old),state)
+                            if fresh.get('binding')!=old.get('binding'):q['requires_regeneration']=True
+                            else:q['clarification']=fresh
+                        except PipelineError:q['requires_regeneration']=True
+                    else:q['clarification']=normalize(question_input(old),state)
+            if before!=state['plan']:
+                state.update(stage1=None,accepted_result=None,last_successful_trial=None)
+                state.pop('adjustment_binding',None)
+            state['pending_clarifications']=[q for q in unique.values() if q.get('kind')=='semantic']
+            if error_phase:
+                self.checkpoint(state,error_phase,list(unique.values()))
+            elif state['pending_clarifications']:
+                self.checkpoint(state,'understanding_checkpoint',list(unique.values()))
+            else:
+                try:
+                    if (state.get('stage1') and state['stage1']['status']=='ready') or self.stage_one(state):
+                        self.stage_two(state,state.get('rules'))
+                except PipelineError as exc:
+                    self.checkpoint(state,'data_checkpoint',[getattr(exc,'problem',{'kind':'plan','reason':str(exc)})])
+                except Exception as exc: self.fault(state,exc,'DWD')
+            if not needs_understanding: state.pop('feedback',None)
+            self.save(state)
+            return state
+
+    def question_options(self,run_id,revision,issue_id):
+        from .advisor import suggest_question_options
+        with self.lock:
+            state=self.load(run_id);self.check(state,revision)
+            issue=next((q for q in state['issues'] if q.get('id')==issue_id and q.get('kind')=='semantic'),None)
+            if issue is None:raise InputProblem('此问题已变化，请刷新后重试','semantic')
+            response=suggest_question_options(self.model_config,state,issue)
+            if response['status']!='ok':raise InputProblem(response['message'],'model',actions=['重试生成选项','保留自定义回答'])
+            q=response['question'];issue['clarification']=q
+            issue.pop('requires_regeneration',None)
+            # Keep the original problem visible and addressable; only its candidate answers change.
+            issue['options_origin_question']=q['question']
+            state['pending_clarifications']=[p for p in state['issues'] if p.get('kind')=='semantic']
+            state['revision']+=1
+            state['events'].append({'action':'question_options_generated','issue_id':issue_id,'source':'real_model','revision':state['revision']})
+            state['feedback']={'message':'选项已生成，尚未选择或执行。'}
+            self.save(state)
+            return state
 
     def instruct(self, run_id, revision, instruction, mode="execute", request_id=None):
         if not isinstance(instruction, str) or not 0 < len(instruction.strip()) <= 10000 or mode not in ("execute", "trial"):
@@ -362,6 +531,9 @@ class PipelineStore:
             if state.get("last_instruction_hash") == request_hash and state.get("last_instruction_context") == context_hash and state["phase"] == "complete":
                 return {**state, "feedback": {"code": "instruction_unchanged", "message": "指令未变化，沿用已有执行结果，没有重复调整。"}}
             before_plan = copy.deepcopy(state["plan"])
+            was_calculation = wants_calculation(state)
+            state["calculation_requested"] = calculation_requested(instruction, wants_calculation(state))
+            self.remember_business_facts(state, instruction)
             state["revision"] += 1
             state["instructions"].append({"id": uuid.uuid4().hex, "text": instruction, "mode": mode})
             state["stage2"] = None
@@ -371,9 +543,19 @@ class PipelineStore:
             else:
                 try:
                     metrics = {m["target"] for p in state["plan"]["platforms"] for m in p["metrics"]}
-                    proposed = infer_rules(instruction, metrics, state.get("rules"))
-                    compile_rules(proposed, metrics)
-                    state["rules"] = proposed
+                    if wants_calculation(state):
+                        base = state.get("rules") or state.get("known_business_facts")
+                        try:
+                            proposed = infer_rules(instruction, metrics, base)
+                        except PipelineError:
+                            if not was_calculation and base and base.get("weights") and not re.search(r"提高|降低|增加|减少|改", instruction):
+                                proposed = copy.deepcopy(base)
+                            else:
+                                raise
+                        compile_rules(proposed, metrics)
+                        state["rules"] = proposed
+                    elif not re.search(r"不.*计算|不.*计分|无需.*计算|只.*(?:清洗|整理)|继续(?:清洗|整理)", instruction):
+                        raise PipelineError("本次数据整理补充超出手动模式的有限语法；可使用整理表单或启用真实模型")
                     understood = True
                 except PipelineError as exc:
                     self.checkpoint(state, "understanding_checkpoint", [{"id": "S1", "kind": "semantic",
@@ -404,7 +586,7 @@ class PipelineStore:
                         self.checkpoint(state, "data_checkpoint", [getattr(exc, "problem", {"kind": "plan", "reason": str(exc)})])
                     except Exception as exc:
                         self.fault(state, exc, "DWD")
-            if state["phase"] == "complete":
+            if state["phase"] in ("complete", "organized"):
                 state["last_instruction_hash"] = request_hash
                 state["last_instruction_context"] = fingerprint({"plan": state["plan"], "rules": state.get("rules"), "dwd": (state.get("stage1") or {}).get("manifest_sha256")})
             self.save(state)
@@ -425,10 +607,21 @@ class PipelineStore:
             self.save(state)
             return state
 
-    def resume(self, run_id, revision, plan=None, rules=None, instruction=None, trial=False, reason=None):
+    def resume(self, run_id, revision, plan=None, rules=None, instruction=None, trial=False, reason=None, answered_issue_id=None):
         with self.lock:
             state = self.load(run_id)
             self.check(state, revision)
+            answered = next((q for q in state['issues'] if q.get('id')==answered_issue_id and q.get('kind')=='semantic'),None) if answered_issue_id else None
+            if answered_issue_id and (answered is None or (plan is None and rules is None)):
+                raise InputProblem('请选择当前待补充问题，并提交经过检查的整理或计算表单','semantic')
+            if answered:
+                qtype=answered.get('clarification',{}).get('type')
+                if qtype in ('identity_policy','strategy','scale','record_grain') and plan is None:
+                    raise InputProblem('此问题需要补充数据整理方式，计算规则不能替代数据裁决','semantic')
+            if rules is not None:
+                state["calculation_requested"] = True
+            elif instruction:
+                state["calculation_requested"] = calculation_requested(instruction, wants_calculation(state))
             if plan is not None:
                 validate_plan(state, plan)
                 changes = plan_diff(state["plan"], plan)
@@ -461,6 +654,9 @@ class PipelineStore:
                 return {**state, "feedback": {"code": "data_still_pending", "message": "数据问题尚未解决，请在问题卡片中补充时间、明确裁决或保持待确认；重复执行不会解决该问题。"}}
             else:
                 state.pop("feedback", None)
+            if answered:
+                state['pending_clarifications']=[q for q in state.get('pending_clarifications',[]) if q.get('id')!=answered_issue_id]
+                state.setdefault('clarification_answers',[]).append({'issue_id':answered_issue_id,'question':answered['reason'],'choice_id':'teacher_form','revision':revision+1,'status':'submitted','text':reason or '教师明确提交当前计算表单'})
             state["revision"] += 1
             state["stage2"] = None
             if (plan is not None and plan != state["plan"]) or (not trial and state["stage1"] is None):
@@ -617,7 +813,7 @@ class PipelineStore:
         return {"changes": plan_diff(state["plan"], plan), "token": token(plan, revision),
                 "impact": "重新整理所有上传数据；旧计算结果失效，原始文件和历史审计保留", "revision": revision}
 
-    def apply_plan(self, run_id, revision, plan, confirmation, reason):
+    def apply_plan(self, run_id, revision, plan, confirmation, reason, answered_issue_id=None):
         with self.lock:
             preview = self.preview_plan(run_id, revision, plan)
             if confirmation != preview["token"]:
@@ -629,10 +825,15 @@ class PipelineStore:
             state = self.load(run_id)
             state["events"].append({"action": "teacher_plan_change", "revision": revision + 1, "reason": reason, "changes": preview["changes"]})
             self.save(state)
-            return self.resume(run_id, revision, plan=plan, reason=reason)
+            return self.resume(run_id, revision, plan=plan, reason=reason,answered_issue_id=answered_issue_id)
 
-    def download(self, run_id, kind):
+    def download(self, run_id, kind, revision=None):
         state = self.load(run_id)
+        if revision is not None and revision != state['revision']:
+            raise RevisionError('任务版本已变化，请重新选择当前处理说明')
+        if kind == 'report':
+            from .audit_report import render
+            return render(self,state)
         if kind == "audit":
             return json.dumps(state, ensure_ascii=False, indent=2).encode("utf-8"), "application/json", "two-stage-audit.json"
         if kind in ("dwd", "dwd_audit", "dwd_code"):

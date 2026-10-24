@@ -72,20 +72,22 @@ function drawProjectForms(){
   });
 }
 function drawSemantic(){
-  $('send-instruction').hidden=false;$('try-instruction').hidden=false;$('instruction-history').hidden=false;
+  $('send-instruction').hidden=false;$('start-pipeline').hidden=true;$('composer-upload').hidden=true;$('try-instruction').hidden=current.calculation_requested===false;$('instruction-history').hidden=false;
   $('instruction-list').innerHTML=(current.instructions||[{text:current.task}]).map(i=>`<p><strong>${i.mode==='trial'?'试算指令':'任务指令'}</strong>：${esc(i.text)}</p>`).join('');
+  if(window.PipelineWorkspace)PipelineWorkspace.conversation(current);
   $('pipeline-task').value=draft.instruction||'';
-  $('pipeline-task').placeholder='补充缺项或追加处理要求，例如：以调整前总评低于60分为范围，将平时表现设为100，其他项目及权重不变。';
-  $('instruction-help').textContent=modelEnabled?'已上传数据继续使用。追加指令会调用真实模型理解，并由Python校验执行；试算不覆盖已采用结果。':'语义理解未启用。支持已说明的有限权重语法；自定义项目及局部调整可展开“修改理解”完成。';
+  $('pipeline-task').placeholder='补充问题答案，或说明下一步要求；需要计分时，请说明项目与规则。';
+  $('composer-title').textContent='你希望如何处理这些数据？';
+  $('instruction-help').textContent=modelEnabled?'':'语义理解未启用，可展开“修改理解”补充规则。';
   $('pipeline-task').oninput=()=>{draft.instruction=$('pipeline-task').value;delete draft.instructionRequest;remember();};
   const rule=current.business_draft||current.rules||{},ops=operations;
   $('semantic-summary').innerHTML=(rule.assessment_items||[]).map(i=>`<p><strong>${esc(i.name)}</strong>：${esc(ops[i.operation])}，来源 ${esc((i.sources||[]).map(s=>rule.assessment_items.find(p=>p.id===s)?.name||s).join('、'))}${i.n?'，最佳'+esc(i.n)+'项':''}；依据：${esc(i.basis)}</p>`).join('')+(rule.adjustments||[]).map(a=>`<p><strong>局部调整</strong>：${esc(a.scope.ids?'编号 '+a.scope.ids.join('、'):'基准 '+a.scope.field+' '+({lt:'低于',le:'不高于',eq:'等于',ge:'不低于',gt:'高于'}[a.scope.op]||a.scope.op)+' '+a.scope.value)}；${esc(a.target)}${esc(adjustmentActions[a.action])}${esc(a.value)}；判断版本：${esc(a.baseline==='before_adjustment'?'本次调整前（执行时固定）':a.baseline)}；特殊状态${a.special==='preserve'?'保留':'待补充'}；依据：${esc(a.basis)}</p>`).join('');
   drawProjectForms();
   bindActivityFilters();
-  if(current.business_draft)$('semantic-summary').insertAdjacentHTML('afterbegin','<p class="note warning">以下为已保存的理解草稿，仍有具体缺项，尚未执行。已明确的权重和项目继续保留。</p>');
+  if(current.business_draft)$('semantic-summary').insertAdjacentHTML('afterbegin','<p class="note warning">理解草稿 · 待补充，尚未执行</p>');
   if(current.phase==='understanding_error'){$('system-section').hidden=false;$('system-section').querySelector('h2').textContent='本次语义理解未完成';$('system-message').textContent=current.issues.map(q=>q.reason).join('；');$('retry-pipeline').textContent='重试理解';}else{$('system-section').querySelector('h2').textContent='本次执行未完成';$('retry-pipeline').textContent='重试当前方案';}
   const result=current.stage2,accepted=current.accepted_result;
-  $('accepted-summary').innerHTML=accepted?`<p class="note">已采用：第${accepted.trial_id}次计算。<a id="download-accepted" href="/api/pipelines/${current.id}/download?kind=accepted">下载已采用结果</a>${result?.mode==='trial'?'；下方为独立试算，尚未替换已采用结果。':''}</p>`:'<p class="hint">尚无已采用的完整结果。</p>';
+  $('accepted-summary').innerHTML=accepted?`<p class="note">已采用：第${accepted.trial_id}次计算。<a id="download-accepted" href="/api/pipelines/${current.id}/download?kind=accepted">下载已采用结果</a>${result?.mode==='trial'?'；下方为独立试算，尚未替换已采用结果。':''}</p>`:'';
   $('adopt-trial').hidden=!(result?.mode==='trial'&&result.status==='complete'&&accepted?.trial_id!==result.trial_id);
   if(result?.mode==='trial')$('dws-status').textContent=`试算 · 第${result.trial_id}次计算 · ${result.status==='complete'?'已完成':'待处理'}`;
   const changes=result?.comparison?.changes||[];
@@ -98,8 +100,8 @@ async function submitInstruction(mode){
   const instruction=$('pipeline-task').value.trim();if(!instruction)throw new Error('请填写本次追加指令');
   draft.instruction=instruction;if(draft.instructionRequestMode!==mode){delete draft.instructionRequest;draft.instructionRequestMode=mode;}draft.instructionRequest||=crypto.randomUUID();remember();
   const state=await request(`/api/pipelines/${current.id}/instruct`,{revision:current.revision,instruction,mode,request_id:draft.instructionRequest});
-  if(state.phase==='complete'){delete draft.instruction;delete draft.instructionRequest;delete draft.rules;}
-  render(state);stateMessage();
+  if(['complete','organized'].includes(state.phase)){delete draft.instruction;delete draft.instructionRequest;delete draft.rules;}
+  const stream=document.getElementById('conversation-stream'),position=stream.scrollTop,follow=stream.scrollHeight-stream.clientHeight-position<80;render(state);stateMessage();if(follow)document.querySelector('.conversation-turn:last-child')?.scrollIntoView({block:'end'});else stream.scrollTop=position;
 }
 $('send-instruction').onclick=()=>action(()=>submitInstruction('execute'));
 $('try-instruction').onclick=()=>action(()=>submitInstruction('trial'));
@@ -110,5 +112,5 @@ function showModelCheck(check){
   $('model-check-result').textContent=`配置：${flag(check.configuration_valid)}；连接：${flag(check.transport_ok)}；协议：${flag(check.protocol_ok)}；业务方案契约：${flag(check.plan_contract_ok)}。${check.message}`;
 }
 $('check-model').onclick=()=>action(async()=>{const check=await request('/api/model/check',{});showModelCheck(check);note(check.message,check.status==='ok'?false:'warning');});
-$('manual-fallback').onclick=()=>{if(current){$('rules-section').open=true;$('rules-section').scrollIntoView({block:'start'});}else note('请先上传CSV；读取后可展开中文表单配置，无需模型。');};
+$('manual-fallback').onclick=()=>{if(current){const section=current.calculation_requested===false?'governance-section':'rules-section';if(section==='rules-section')$('optional-business').open=true;$(section).open=true;PipelineWorkspace.inspect(section==='rules-section'?'optional-business':'dwd','修改理解');}else note('请先描述任务并上传CSV；读取后可使用中文表单。');};
 window.dispatchEvent(new Event('pipeline-semantic-ready'));

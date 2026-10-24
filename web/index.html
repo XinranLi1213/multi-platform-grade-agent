@@ -16,7 +16,7 @@
   </section>
   <section id="reading"><div class="section-title"><h2><b>02</b> 实际读取与检查</h2><span>所有统计来自真正读取的内容</span></div><div id="read-content" class="empty">上传后显示行数、列名、预览、空值、重复与读取异常。</div></section>
   <section id="planning"><div class="section-title"><h2><b>03</b> 提出、修正清洗与关联方案</h2><button id="suggest-btn" disabled>请求真实模型建议</button></div>
-    <details><summary>语义分析配置入口</summary><p class="hint">复制项目中的 model_config.example.json 为 model_config.local.json，填写 endpoint、model 与 API 密钥环境变量名，启用后重启服务。也可通过 --model-config 指定文件。密钥只设置在服务端环境变量中，不在本页面填写。未配置时，使用下方统计候选与手动映射完成全部流程。</p></details>
+    <details><summary>语义分析配置入口</summary><p class="hint">在本机项目控制台配置，或复制 model_config.example.json 为 config/model_config.local.json，填写 endpoint、model 与 API 密钥环境变量名，启用后重启服务。也可通过 --model-config 指定文件。密钥仅在本机控制台或服务端环境配置，不在本页面填写。未配置时，使用下方统计候选与手动映射完成全部流程。</p></details>
     <div id="questions" class="note">任务或数据有歧义时，先明确输出每行含义、字段对应、身份依据与重复判定。</div>
     <div id="model-advice"></div>
     <details><summary>统计候选对应（仅数据证据，不代表语义判断）</summary><div id="candidates"></div></details>

@@ -58,7 +58,8 @@ def compile_rules(rules, metrics):
     if "weights" in rule:
         weights = rule["weights"]
         if not isinstance(weights, dict) or not weights or not set(weights) <= set(metrics):
-            raise PipelineError("权重必须引用阶段一真实项目")
+            actual=','.join(weights) if isinstance(weights,dict) else type(weights).__name__
+            raise PipelineError("权重必须引用阶段一真实项目；weights须为名称到小数权重的对象。允许名称："+','.join(sorted(metrics))+"；收到："+actual)
         values = {key: number(value) for key, value in weights.items()}
         if any(value < 0 for value in values.values()) or sum(values.values()) != 1:
             raise PipelineError("权重须非负且合计100%；不能自行归一或推断其他项目如何调整")
@@ -81,6 +82,8 @@ def compile_rules(rules, metrics):
         _, refs = inspect_expression(item["expr"], names)
         references.update(refs & set(metrics))
         names.add(item["name"])
+    if rule.get('summary_field') is not None and rule['summary_field'] not in names:
+        raise PipelineError('summary_field引用不存在的结果列：'+str(rule['summary_field'])+'；实际可用列：'+','.join(sorted(names))+'。output是列名，不是百分制格式；总评输出请使用output=总评')
     if "precision" in rule and (type(rule["precision"]) is not int or not 0 <= rule["precision"] <= 10):
         raise PipelineError("precision须为0至10；不指定时保留确定性十进制结果，不擅自舍入")
     if "excellent_threshold" in rule:

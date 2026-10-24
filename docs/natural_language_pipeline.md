@@ -3,8 +3,8 @@
 启动：
 
 ```powershell
-Set-Location 'D:\programs\multi-platform-grade-agent'
-python -u -X utf8 app.py --port 8765
+# 在解压后的正式程序目录执行
+python -B -u -X utf8 tools/launch.py
 ```
 
 访问 http://127.0.0.1:8765/pipeline 。沿用Python标准库和原生HTML/CSS/JavaScript，无生产前端依赖。
@@ -17,7 +17,7 @@ python -u -X utf8 app.py --port 8765
 4. “修改理解”默认折叠，可用中文表单定义任意名称的考核项目、组成方式、权重、状态政策及局部调整。JSON仅供高级操作。
 5. 后续在同一任务框追加指令。“执行追加指令”更新实际方案；“试算并查看变化”产生独立试算。指令包含“试试看”“看看变化”“先试算”“试算一下”也采用试算模式。试算不替换已采用结果，点击“采用本次试算结果”后切换。
 
-真实模型配置沿用model_config.example.json：复制为model_config.local.json，设置enabled=true、服务商Chat Completions兼容endpoint和model。api_key_env指定密钥环境变量，密钥不写入页面或日志；可通过app.py --model-config指定配置路径。正式程序没有fixture或假模型回复。
+真实模型配置沿用model_config.example.json：复制到config/model_config.local.json，设置enabled=true、服务商Chat Completions兼容endpoint和model。api_key_env指定密钥环境变量，密钥不写入页面或日志；可通过app.py --model-config指定配置路径。正式程序没有fixture或假模型回复。
 
 未配置模型时仅支持明确标注的有限自然语言语法，例如完整项目权重和既有状态语法；不承诺自动理解任意调分指令。自定义项目和调整的完整手动流程仍可运行。读取、校验和成绩运算不依赖模型。
 
@@ -57,23 +57,23 @@ python -u -X utf8 app.py --port 8765
 验收脚本独立于正式程序：
 
 ```powershell
-python -X utf8 tests/test_semantic_pipeline.py
-python -X utf8 tests/test_two_stage.py
-python -X utf8 tests/test_teacher_pipeline.py
-python -X utf8 tests/test_interactive.py
+python -B -X utf8 ../multi-platform-grade-agent-support/development/tests/test_semantic_pipeline.py
+python -B -X utf8 ../multi-platform-grade-agent-support/development/tests/test_two_stage.py
+python -B -X utf8 ../multi-platform-grade-agent-support/development/tests/test_teacher_pipeline.py
+python -B -X utf8 ../multi-platform-grade-agent-support/development/tests/test_interactive.py
 
-# 独立测试服务，测试状态在work/teacher-browser-state
-python -u -X utf8 tests/serve_teacher_browser.py
+# 独立测试服务，测试状态在support/artifacts/work/teacher-browser-state
+python -B -u -X utf8 ../multi-platform-grade-agent-support/dev.py serve-browser
 # 另一个终端执行
-node tests/semantic_browser.cjs
-node tests/two_stage_browser.cjs
-node tests/checkpoint_browser.cjs
+node ../multi-platform-grade-agent-support/development/tests/semantic_browser.cjs
+node ../multi-platform-grade-agent-support/development/tests/two_stage_browser.cjs
+node ../multi-platform-grade-agent-support/development/tests/checkpoint_browser.cjs
 $env:INTEGRATION_TEST_URL = 'http://127.0.0.1:8766'
-node tests/browser_acceptance.cjs
+node ../multi-platform-grade-agent-support/development/tests/browser_acceptance.cjs
 ```
 
 浏览器测试使用本机Edge及已有Playwright测试运行时，非正式程序依赖。测试覆盖真实按钮提交、状态变化、刷新、版本及下载，截图仅作辅助。
 
-模拟输入：tests/semantic_data/roster.csv、performance.csv。预先约定：两展示平均组成课堂展示40%、实践40%、平时20%、缓考保留；001/002/003/004原总评应分别48.0/86.0/0.0/缓考。将调整前总评低于60者平时表现设100，仅001和003命中，总评应为64.0/86.0/20.0/缓考，原始平时仍20/90/0/70。
+模拟输入：../multi-platform-grade-agent-validation/cases/07_自定义项目与局部调整/输入文件/roster.csv、performance.csv。预先约定：两展示平均组成课堂展示40%、实践40%、平时20%、缓考保留；001/002/003/004原总评应分别48.0/86.0/0.0/缓考。将调整前总评低于60者平时表现设100，仅001和003命中，总评应为64.0/86.0/20.0/缓考，原始平时仍20/90/0/70。
 
-详细预期、实际及未运行检查汇总在outputs/semantic_acceptance.md；逐项记录为semantic_backend_acceptance.json和semantic_browser_acceptance.json。桌面三组数据的原文件哈希由原有教师验收核对，不覆盖文件。
+详细预期、实际及未运行检查汇总在历史support/history/outputs/semantic_acceptance.md；逐项记录为semantic_backend_acceptance.json和semantic_browser_acceptance.json。桌面三组数据的原文件哈希由原有教师验收核对，不覆盖文件。

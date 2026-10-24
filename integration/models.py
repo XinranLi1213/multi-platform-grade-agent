@@ -2,12 +2,14 @@
 
 import json
 import os
+import urllib.error
+import urllib.parse
+import urllib.request
 from pathlib import Path
-from .model_client import configuration, complete_json, ModelFailure
 
 
 def load_config(path=None):
-    path = Path(path or os.environ.get("INTEGRATION_MODEL_CONFIG", Path(__file__).resolve().parents[1] / "model_config.local.json"))
+    path = Path(path or os.environ.get("INTEGRATION_MODEL_CONFIG", "model_config.local.json"))
     if not path.exists():
         return {"enabled": False, "_config_error": "config_missing"}
     try:
@@ -18,12 +20,16 @@ def load_config(path=None):
 
 
 def model_status(config):
+    from .model_client import configuration, ModelFailure
     try:
         configuration(config)
-        available, code, message = True, "configured", "真实模型接口已配置（连通性待请求验证）"
     except ModelFailure as exc:
-        available, code, message = False, exc.code, "语义分析尚未启用；" + exc.message
-    return {"enabled": available, "label": message, "code": code, "connection_checked": False,
+        return {**exc.public(), 'enabled':False, 'label':exc.message, 'samples_enabled':False,
+                'connection_checked':False, 'disclosure':'语义未启用，使用手动流程；密钥仅在服务端配置。'}
+    available = (config.get("enabled") is True and isinstance(config.get("endpoint"), str) and bool(config["endpoint"].strip())
+        and isinstance(config.get("model"), str) and bool(config["model"].strip())
+        and bool(os.environ.get(str(config.get("api_key_env", "INTEGRATION_MODEL_API_KEY")))))
+    return {"enabled": bool(available), "connection_checked":False, "label": "真实模型接口已配置（连通性待请求验证）" if available else "语义分析尚未启用；请手动确认字段映射和关联方案",
             "samples_enabled": available and config.get("allow_sample_values") is True,
             "disclosure": "通用工作台点击请求时发送；教师双阶段页在提交任务/追加指令后自动发送任务、真实表头及程序统计。配置允许后才发送每表最多3条真实样例。方案由程序校验，歧义需补充。"}
 
@@ -63,6 +69,11 @@ def validate_advice(value, files):
 def get_advice(config, task, files):
     if not model_status(config)["enabled"]:
         return {"status": "disabled", "message": model_status(config)["label"]}
+    endpoint = config["endpoint"]
+    parsed = urllib.parse.urlparse(endpoint)
+    if parsed.scheme != "https" and not (parsed.scheme == "http" and parsed.hostname in ("127.0.0.1", "localhost")):
+        return {"status": "error", "message": "模型地址须使用HTTPS，或本机HTTP地址"}
+    key = os.environ[str(config.get("api_key_env", "INTEGRATION_MODEL_API_KEY"))]
     metadata = [{"file": f["id"], "name": f["name"], "headers": f["headers"], "row_count": f["row_count"],
                  "column_statistics": f["profile"].get("columns", {})} for f in files]
     # Distinct-value summaries may reveal content; send counts only unless samples are explicitly enabled.
@@ -76,11 +87,12 @@ def get_advice(config, task, files):
         "不得补值或猜测。不能确定时保留不同字段并提问。输出JSON对象，包含mappings数组"
         "（每项file=A或B,column=原列名,target=建议统一列名,reason=依据）、key_fields数组、"
         "questions数组、row_meaning、rationale。不能将同一文件两列归到同一目标。不要输出确认标记。")
-    messages = [{"role": "system", "content": instructions},
-        {"role": "user", "content": json.dumps({"task": task, "files": metadata}, ensure_ascii=False)}]
+    payload = {"model": config["model"], "messages": [{"role": "system", "content": instructions},
+        {"role": "user", "content": json.dumps({"task": task, "files": metadata}, ensure_ascii=False)}]}
+    from .model_client import complete_json, ModelFailure
     try:
-        return {"status": "ok", "advice": validate_advice(complete_json(config, messages), files)}
+        return {"status": "ok", "advice": validate_advice(complete_json(config,payload['messages']), files)}
     except ModelFailure as exc:
         return exc.public()
     except Exception:
-        return {"status": "error", "code": "plan_validation", "message": "模型建议未通过结构与真实字段检查；手动流程保留，未生成替代建议"}
+        return {"status": "error", "message": "模型请求失败或建议未通过结构校验；保留手动流程，未生成替代建议"}

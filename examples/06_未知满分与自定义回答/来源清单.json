@@ -1,0 +1,12 @@
+[
+  {
+    "file": "业务记录.csv",
+    "source": "choice_matrix_20261024_162646/inputs/02/业务记录.csv",
+    "sha256": "df7c4d310b500147e7160c79669031552c5a45d309f4e7346d91f2006065b5f7"
+  },
+  {
+    "file": "主名册.csv",
+    "source": "choice_matrix_20261024_162646/inputs/02/主名册.csv",
+    "sha256": "4e8d1fad715b17ebbcb158d54382d9d0f088bc315df7a36591b02ac891b32797"
+  }
+]

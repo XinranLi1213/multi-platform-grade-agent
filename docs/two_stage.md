@@ -3,8 +3,8 @@
 正式入口是 app.py，浏览器访问 http://127.0.0.1:8765/pipeline 。每次上传2至6份用户CSV，可以包括主花名册；不依赖测试文件名，正式入口不导入数据生成器。每份最多2 MiB、最多5100条CSV记录、表头最多128列。其他表格格式仍明确不支持。
 
 ```powershell
-Set-Location 'D:\programs\multi-platform-grade-agent'
-python -u -X utf8 app.py --port 8765
+# 在解压后的正式程序目录执行
+python -B -u -X utf8 tools/launch.py
 ```
 
 用户操作：在“你希望如何处理这些数据？”中填写任务，选择各平台文件，点击“整理并计算”。没有未决问题时连续执行两个阶段。页面展示实际理解的归并、分制、权重及状态规则；读取详情可展开核对原值。
@@ -108,17 +108,17 @@ state/pipelines/<流程编号>/
 
 ```powershell
 # 独立生成测试数据与独立Python参考答案，不由正式入口调用
-python -X utf8 tests/generate_two_stage.py
-python -X utf8 tests/test_two_stage.py
+python -B -X utf8 ../multi-platform-grade-agent-support/development/tests/generate_two_stage.py
+python -B -X utf8 ../multi-platform-grade-agent-support/development/tests/test_two_stage.py
 
 # 另一个终端先启动app.py，再做真实浏览器验收
-node tests/two_stage_browser.cjs
+node ../multi-platform-grade-agent-support/development/tests/two_stage_browser.cjs
 
 # 同一个流程也可由CLI调用
-python -X utf8 pipeline_cli.py --task '实验40%，作业60%，未交记0，保留一位小数' --file tests/two_stage_data/roster.csv --file tests/two_stage_data/practice.csv --file tests/two_stage_data/assignment.csv --state-dir outputs/two_stage_demo
+python -X utf8 pipeline_cli.py --task '实验40%，作业60%，未交记0，保留一位小数' --file ../multi-platform-grade-agent-validation/cases/05_双阶段三人及异常变体/输入文件/roster.csv --file ../multi-platform-grade-agent-validation/cases/05_双阶段三人及异常变体/输入文件/practice.csv --file ../multi-platform-grade-agent-validation/cases/05_双阶段三人及异常变体/输入文件/assignment.csv --state-dir ../multi-platform-grade-agent-support/artifacts/work/two_stage_demo
 ```
 
-运行前预期见 tests/TWO_STAGE_EXPECTATIONS.md。实际结果见 outputs/two_stage_acceptance.md、outputs/two_stage_acceptance.json，以及浏览器报告 outputs/two_stage_browser.json。Python验收真实启动HTTP服务和生成的Python子进程，没有模拟计算；浏览器检查实际上传、卡点续算、试算、刷新、两阶段DOM/API与下载CSV逐字段一致。
+运行前预期见 ../multi-platform-grade-agent-validation/references/TWO_STAGE_EXPECTATIONS.md。实际结果见历史support/history/outputs/two_stage_acceptance.md、outputs/two_stage_acceptance.json，以及浏览器报告 outputs/two_stage_browser.json。Python验收真实启动HTTP服务和生成的Python子进程，没有模拟计算；浏览器检查实际上传、卡点续算、试算、刷新、两阶段DOM/API与下载CSV逐字段一致。
 
 实现定位：pipeline/ingest.py负责表头布局和明确默认策略；pipeline/dwd.py只做治理与物理落盘；pipeline/rules.py校验受限表达式和有限自然语言语法；pipeline/dws.py只读ready产物并实际执行计算；pipeline/service.py串联和管理卡点/版本/试算；pipeline/advisor.py复用真实模型配置提方案；web/pipeline.js实现独立界面；app.py挂接/api/pipelines接口。
 

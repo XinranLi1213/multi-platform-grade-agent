@@ -12,6 +12,7 @@ outputs/
 work/
 .env
 model_config.local.json
+secrets.local.json
 runtime/
 dist/
 .env.*

@@ -4,6 +4,7 @@ import os
 import re
 import socket
 import ssl
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -93,8 +94,24 @@ def complete_json(config, messages):
     request = urllib.request.Request(endpoint, data=body, method="POST",
         headers={"Content-Type": "application/json", "Authorization": "Bearer " + key})
     try:
+        deadline = time.monotonic() + timeout
         with urllib.request.build_opener(NoRedirect()).open(request, timeout=timeout) as response:
-            raw = response.read(MAX_RESPONSE + 1)
+            chunks, size = [], 0
+            while size <= MAX_RESPONSE:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise TimeoutError
+                # urllib's timeout is per socket operation. A provider sending
+                # slow partial chunks must not extend this request indefinitely.
+                channel = getattr(getattr(getattr(response, "fp", None), "raw", None), "_sock", None)
+                if channel is not None:
+                    channel.settimeout(remaining)
+                chunk = response.read1(min(65536, MAX_RESPONSE + 1 - size))
+                if not chunk:
+                    break
+                chunks.append(chunk)
+                size += len(chunk)
+            raw = b"".join(chunks)
     except urllib.error.HTTPError as exc:
         status = exc.code
         exc.close()  # Provider body may echo secrets; never read or log it.

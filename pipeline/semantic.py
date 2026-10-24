@@ -78,6 +78,17 @@ def profiles(files, plan=None, samples=False):
                 "exact_duplicate_rows": len(table["rows"]) - len({tuple(r["values"].values()) for r in table["rows"]}),
                 "reading_errors": table["errors"], "note": "统计值不是业务含义或满分证明；相同学生可以有不同活动记录"}
         spec = specs.get(file["id"], {})
+        if spec.get('id_column') in table['headers']:
+            groups={}
+            for row in table['rows']:
+                key=clean(row['values'][spec['id_column']])
+                if key:groups[key]=groups.get(key,0)+1
+            distribution={}
+            for size in groups.values():
+                if size>1:distribution[str(size)]=distribution.get(str(size),0)+1
+            item['repeated_id_groups']={'id_column':spec['id_column'],'groups_with_multiple_rows':sum(distribution.values()),
+                'rows_per_group_distribution':distribution,'maximum_rows_per_id':max(groups.values(),default=0),
+                'note':'按该表实际非空编号分组；全表重复总数不是每个人的提交数，也不证明记录属于同一业务活动'}
         keys = [[spec.get("id_column")], [spec.get("name_column"), spec.get("class_column")],
                 [spec.get("name_column"), spec.get("phone_column")]]
         item["candidate_key_checks"] = []
@@ -94,6 +105,55 @@ def profiles(files, plan=None, samples=False):
             indexes = sorted({0, len(rows) // 2, len(rows) - 1}) if rows else []
             item["samples"] = [rows[i] for i in indexes]
         result.append(item)
+    return result
+
+
+def entity_link_checks(files, plan):
+    """Aggregate actual joins for the model, without disclosing IDs or names."""
+    specs = {p["file_id"]: p for p in plan.get("platforms", [])}
+    master = specs.get(plan.get("roster_file"))
+    by_file = {f["id"]: f for f in files}
+    if not master or not master.get("id_column"):
+        return []
+    table = layout(by_file[master["file_id"]], master.get("header_line"))
+    index = {}
+    for row in table["rows"]:
+        identity = clean(row["values"].get(master["id_column"], ""))
+        if identity:
+            index.setdefault(identity, []).append(row["values"])
+    result = []
+    for ident, spec in specs.items():
+        if ident == master["file_id"]:
+            continue
+        other = layout(by_file[ident], spec.get("header_line"))
+        matched = missing = unmatched = ambiguous = name_conflicts = class_conflicts = 0
+        for row in other["rows"]:
+            values = row["values"]
+            identity = clean(values.get(spec.get("id_column"), ""))
+            if not identity:
+                missing += 1
+                continue
+            candidates = index.get(identity, [])
+            if not candidates:
+                unmatched += 1
+            elif len(candidates) > 1:
+                ambiguous += 1
+            else:
+                matched += 1
+                for field in ("name_column", "class_column"):
+                    left = clean(values.get(spec.get(field), ""))
+                    right = clean(candidates[0].get(master.get(field), ""))
+                    if left and right and left != right:
+                        if field == "name_column":
+                            name_conflicts += 1
+                        else:
+                            class_conflicts += 1
+        result.append({"file_id": ident, "reference_file_id": master["file_id"],
+            "id_column": spec.get("id_column"), "reference_id_column": master["id_column"],
+            "matched_nonempty_id_records": matched, "missing_id_records": missing,
+            "unmatched_nonempty_id_records": unmatched, "ambiguous_reference_id_records": ambiguous,
+            "same_id_name_conflicts": name_conflicts, "same_id_class_conflicts": class_conflicts,
+            "basis": "Python实际以清除外围空白后的文本编号比较，保留前导零；仅为关联证据，不是人工身份确认。重复提交不等于重复对象。"})
     return result
 
 

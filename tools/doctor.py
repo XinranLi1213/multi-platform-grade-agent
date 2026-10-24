@@ -12,14 +12,14 @@ sys.path.insert(0, str(ROOT))
 from integration.models import load_config, model_status
 from integration.model_client import check_connection
 
-REQUIRED = ("VERSION", "app.py", "pipeline_cli.py", "integration/__init__.py", "integration/model_client.py",
+REQUIRED = ("VERSION", "app.py", "pipeline_cli.py", "grade_agent.py", "start.cmd", "启动控制台.vbs", "启动控制台.cmd", "tools/__init__.py", "tools/doctor.py", "tools/launch.py", "tools/desktop_console.py", "tools/console_core.py", "tools/console_worker.py", "tools/project_window.py", "tools/create_shortcut.vbs", "integration/local_settings.py", "model_config.example.json", "integration/__init__.py", "integration/model_client.py",
             "integration/models.py", "integration/store.py", "integration/engine.py", "integration/csv_io.py",
             "pipeline/__init__.py", "pipeline/common.py", "pipeline/ingest.py", "pipeline/semantic.py", "pipeline/service.py",
-            "pipeline/interaction.py", "pipeline/advisor.py", "pipeline/rules.py", "pipeline/dwd.py", "pipeline/dws.py",
+            "pipeline/interaction.py", "pipeline/advisor.py", "pipeline/rules.py", "pipeline/dwd.py", "pipeline/dws.py", "pipeline/workspace.py", "pipeline/intent.py", "pipeline/conversation.py", "pipeline/clarifications.py", "pipeline/audit_report.py",
             "web/index.html", "web/app.js", "web/pipeline.html", "web/pipeline.js", "web/semantic.js", "web/style.css")
 
 
-def inspect_environment(root=ROOT, state_dir=None, port=8765, model_config=None):
+def inspect_environment(root=ROOT, state_dir=None, port=8765, model_config=None, gui=False):
     root = Path(root).resolve()
     state_dir = Path(state_dir or root / "runtime/state").resolve()
     missing = [name for name in REQUIRED if not (root / name).is_file()]
@@ -53,6 +53,35 @@ def inspect_environment(root=ROOT, state_dir=None, port=8765, model_config=None)
     except (OSError, ValueError):
         free = False
     checks.append({"name": "本机端口", "ok": free, "message": f"127.0.0.1:{port}可用" if free else f"端口{port}不可用；关闭旧服务或使用start.cmd --port 8767"})
+    # Compile bytes without importing code or creating __pycache__. Checking the
+    # actual working tree catches edits made after earlier isolated test copies.
+    syntax_errors = []
+    for name in sorted({name for name in REQUIRED if name.endswith(".py")}):
+        path = root / name
+        if not path.is_file():
+            continue  # Already reported by the missing-file check.
+        try:
+            compile(path.read_bytes(), name, "exec")
+        except SyntaxError as exc:
+            syntax_errors.append(f"{name} 第{exc.lineno or 1}行（{type(exc).__name__}）")
+        except OSError:
+            syntax_errors.append(name + " 无法读取")
+    checks.append({"name": "源码语法", "ok": not syntax_errors,
+                   "message": "运行源码语法检查通过" if not syntax_errors else
+                   "程序文件存在错误，服务尚未启动：" + "、".join(syntax_errors) + "。请修复或恢复程序文件；无需修改密钥或重传数据"})
+    from integration.local_settings import SecretStore, SettingsError
+    try:
+        tracked = SecretStore(root).tracking_status() == "tracked"
+        checks.append({"name": "本机密钥保护", "ok": not tracked, "message": "密钥文件未被Git跟踪" if not tracked else "密钥文件已被Git跟踪，请先处理；未自动修改索引"})
+    except SettingsError:
+        checks.append({"name": "本机密钥保护", "ok": not (root / "config/secrets.local.json").exists(), "message": "无法检查Git；本机文件密钥不可用，仅本次输入或环境变量仍可使用"})
+    if gui:
+        try:
+            import tkinter
+            tk_available = True
+        except ImportError:
+            tk_available = False
+        checks.append({"name": "桌面控制台", "ok": tk_available, "message": "Tkinter可用" if tk_available else "请安装包含Tcl/Tk的Python；原start.cmd仍可用于命令行操作"})
     config = load_config(model_config or root / "config/model_config.local.json")
     status = model_status(config)
     return {"ok": all(c["ok"] for c in checks), "checks": checks, "model": status, "loopback_only": True}
@@ -64,8 +93,9 @@ def main():
     parser.add_argument("--state-dir", type=Path)
     parser.add_argument("--model-config", type=Path)
     parser.add_argument("--check-model", action="store_true", help="主动发起一次真实模型连接检查，不使用教师数据")
+    parser.add_argument("--gui", action="store_true", help="同时检查Tkinter桌面控制台依赖")
     args = parser.parse_args()
-    report = inspect_environment(state_dir=args.state_dir, port=args.port, model_config=args.model_config)
+    report = inspect_environment(state_dir=args.state_dir, port=args.port, model_config=args.model_config, gui=args.gui)
     if args.check_model:
         report["model_check"] = check_connection(load_config(args.model_config or ROOT / "config/model_config.local.json"))
     print(json.dumps(report, ensure_ascii=False, indent=2))

@@ -12,6 +12,7 @@ from pathlib import Path
 from .csv_io import read_upload
 from .engine import analyze, default_plan, execute
 from .models import get_advice
+from .model_client import redact
 
 
 class StateError(ValueError):
@@ -119,6 +120,9 @@ class SessionStore:
         state = self.load(sid)
         self.check_revision(state, revision)
         advice = get_advice(self.model_config, state["task"], state["files"])
+        key = os.environ.get(str(self.model_config.get("api_key_env", "INTEGRATION_MODEL_API_KEY")), "")
+        if key:
+            advice = redact(advice, key)  # Protect the legacy adapter boundary without altering raw input values.
         with self.lock:
             latest = self.load(sid)
             self.check_revision(latest, revision)

@@ -1,4 +1,5 @@
 * text=auto
+*.vbs -text
 *.py text eol=lf
 *.js text eol=lf
 *.cjs text eol=lf
@@ -12,5 +13,5 @@
 VERSION text eol=lf
 .gitignore text eol=lf
 .gitattributes text eol=lf
-# Intentional surrounding spaces are part of this CSV acceptance fixture.
-tests/data/09_formats/spaced.csv whitespace=-blank-at-eol
+# Keep published synthetic evidence byte-identical to its SHA256 provenance.
+examples/** -text whitespace=cr-at-eol
